@@ -1,0 +1,41 @@
+{
+  "name": "agent-janitor",
+  "version": "0.1.0",
+  "description": "Cross-harness janitor for AI coding agent session storage: audit, trash-safe cleanup, and SQLite vacuum for OpenCode, Codex, Claude Code and friends.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "bin": {
+    "agent-janitor": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && node --test --test-reporter=spec dist-test/test/*.test.js",
+    "test:only": "tsc -p tsconfig.test.json && node --test --test-reporter=spec dist-test/**/*.test.js"
+  },
+  "keywords": [
+    "opencode",
+    "codex",
+    "claude-code",
+    "ai-agent",
+    "disk-usage",
+    "cleanup",
+    "sqlite",
+    "vacuum",
+    "cli"
+  ],
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
