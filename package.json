@@ -4,6 +4,14 @@
   "description": "Cross-harness janitor for AI coding agent session storage: audit, trash-safe cleanup, and SQLite vacuum for OpenCode, Codex, Claude Code and friends.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yybe/Agent-Janitor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Yybe/Agent-Janitor/issues"
+  },
+  "homepage": "https://github.com/Yybe/Agent-Janitor#readme",
   "engines": {
     "node": ">=22.5.0"
   },
@@ -13,6 +21,7 @@
   "main": "dist/cli.js",
   "files": [
     "dist",
+    "assets",
     "README.md",
     "LICENSE"
   ],

@@ -24,12 +24,12 @@ export interface RunResult {
   stderr: string;
 }
 
-/** Run the built CLI with USERPROFILE pointed at a fake home. */
+/** Run the built CLI with a fake home (USERPROFILE on Windows, HOME elsewhere). */
 export function runCli(homeRoot: string, args: string[], timeoutMs = 120_000): RunResult {
   const res = spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
     timeout: timeoutMs,
-    env: { ...process.env, USERPROFILE: homeRoot },
+    env: { ...process.env, USERPROFILE: homeRoot, HOME: homeRoot },
   });
   return { status: res.status ?? -1, stdout: res.stdout ?? '', stderr: res.stderr ?? '' };
 }

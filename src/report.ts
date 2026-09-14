@@ -9,10 +9,6 @@ function padLeft(s: string, n: number): string {
   return s.length >= n ? s : ' '.repeat(n - s.length) + s;
 }
 
-function truncate(s: string, n: number): string {
-  return s.length <= n ? s : s.slice(0, n - 1) + '…';
-}
-
 /** keep the TAIL of long paths — basenames (the identifying part) live at the end */
 function truncatePath(p: string, n = 120): string {
   return p.length <= n ? p : '…' + p.slice(p.length - n + 1);
@@ -27,40 +23,102 @@ function age(mtimeMs: number | undefined): string {
   return `${Math.round(days / 30)}mo`;
 }
 
-export function renderScan(result: ScanResult): string {
+/** machine kind -> human label for grouped scan output */
+function kindLabel(kind: string): string {
+  const map: Record<string, string> = {
+    'snapshot-dir': 'Superseded snapshots',
+    'session-file': 'Stale sessions',
+    log: 'Logs',
+    'tmp-junk': 'Temp files',
+    'stale-backup': 'Stale backups',
+  };
+  return map[kind] ?? kind;
+}
+
+export function renderScan(result: ScanResult, version?: string): string {
   const lines: string[] = [];
-  lines.push(`agent-janitor scan — ${result.scannedAt} (retention ${result.retentionDays}d)`);
+  lines.push(version ? `agent-janitor v${version}` : 'agent-janitor scan');
+  lines.push('');
+  lines.push(`Scanning AI coding-agent storage... (retention ${result.retentionDays}d)`);
   lines.push('');
   for (const a of result.adapters) {
-    if (!a.present && a.notes.length === 0) continue;
-    lines.push(`── ${a.adapter} ${'─'.repeat(Math.max(3, 60 - a.adapter.length))}`);
-    for (const note of a.notes) lines.push(`   note: ${note}`);
+    lines.push(a.present ? `✓ ${a.adapter}` : `- ${a.adapter} (not found)`);
+  }
+  for (const a of result.adapters) {
+    for (const note of a.notes) lines.push(`  note (${a.adapter}): ${note}`);
+  }
+  lines.push('');
+  lines.push('Reclaimable storage');
+  lines.push('');
+  let anyReclaimable = false;
+  for (const a of result.adapters) {
     const trash = a.findings.filter((f) => f.category === 'trash');
-    const reports = a.findings.filter((f) => f.category === 'report-only');
-    if (trash.length > 0) {
-      lines.push(`   ${pad('KIND', 16)}${padLeft('SIZE', 10)}  ${pad('AGE', 6)}PATH`);
-      for (const f of trash) {
-        lines.push(`   ${pad(f.kind, 16)}${padLeft(formatBytes(f.bytes), 10)}  ${pad(age(f.mtimeMs), 6)}${truncatePath(f.path)}`);
-      }
-      lines.push(`   ${pad('', 16)}${padLeft(formatBytes(trash.reduce((s, f) => s + f.bytes, 0)), 10)}  trash-eligible`);
+    const dbBytes = a.dbReport && a.dbReport.schemaGate.ok
+      ? a.dbReport.supersededBytes + a.dbReport.dupeBytes + a.dbReport.freelistBytes
+      : 0;
+    if (trash.length === 0 && dbBytes === 0 && !a.dbReport) continue;
+    anyReclaimable = true;
+    lines.push(a.adapter);
+    // group file findings by kind so output reads as categories, not raw paths
+    const byKind = new Map<string, { count: number; bytes: number }>();
+    for (const f of trash) {
+      const g = byKind.get(f.kind) ?? { count: 0, bytes: 0 };
+      g.count++;
+      g.bytes += f.bytes;
+      byKind.set(f.kind, g);
     }
-    if (reports.length > 0) {
-      lines.push(`   report-only (never touched):`);
-      for (const f of reports) {
-        lines.push(`   ${pad(f.kind, 16)}${padLeft(formatBytes(f.bytes), 10)}  ${pad('', 6)}${truncatePath(f.path, 100)} — ${f.description}`);
-      }
+    for (const [kind, g] of [...byKind.entries()].sort((x, y) => y[1].bytes - x[1].bytes)) {
+      lines.push(`${kindLabel(kind).padEnd(28)} ${formatBytes(g.bytes).padStart(9)}  (${g.count} item${g.count === 1 ? '' : 's'})`);
     }
-    if (a.dbReport) lines.push(...renderDbReport(a.dbReport));
+    if (a.dbReport) lines.push(...renderDbSummary(a.dbReport));
+    // full path detail, newest last so the biggest offenders are visible
+    const detail = [...trash].sort((x, y) => y.bytes - x.bytes).slice(0, 10);
+    for (const f of detail) {
+      lines.push(`  ${padLeft(formatBytes(f.bytes), 9)}  ${pad(age(f.mtimeMs), 5)} ${truncatePath(f.path, 90)}`);
+    }
+    if (trash.length > detail.length) lines.push(`  ... and ${trash.length - detail.length} more (run with --json for the full list)`);
     lines.push('');
   }
-  lines.push('── totals ' + '─'.repeat(52));
-  lines.push(`   trash-eligible files:        ${padLeft(formatBytes(result.fileReclaimableBytes), 10)}`);
-  lines.push(`   db reclaim estimate (upper): ${padLeft(formatBytes(result.dbReclaimableEstimateBytes), 10)}`);
-  lines.push(`   report-only (untouched):     ${padLeft(formatBytes(result.reportOnlyBytes), 10)}`);
+  if (!anyReclaimable) lines.push('(nothing reclaimable found)\n');
+  const potential = result.fileReclaimableBytes + result.dbReclaimableEstimateBytes;
+  lines.push('------------------------------------');
+  lines.push(`Potential reclaimable space  ${formatBytes(potential).padStart(9)}`);
+  lines.push('------------------------------------');
+  lines.push(`  files: ${formatBytes(result.fileReclaimableBytes)} trash-eligible · db estimate (upper bound): ${formatBytes(result.dbReclaimableEstimateBytes)}`);
   lines.push('');
-  lines.push(`run 'agent-janitor clean --apply' to trash file findings (dry-run is default).`);
-  lines.push(`run 'agent-janitor vacuum' for the opencode DB (dry-run is default).`);
+  const reportOnly = result.adapters.flatMap((a) => a.findings.filter((f) => f.category === 'report-only'));
+  if (reportOnly.length > 0) {
+    lines.push('Never touched (report-only):');
+    const seen = new Set<string>();
+    for (const f of reportOnly.slice(0, 8)) {
+      const key = `${f.adapter}:${f.description}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(`  - ${f.adapter}: ${truncatePath(f.path, 60)} — ${f.description}`);
+    }
+    lines.push(`  ${reportOnly.length} path(s), ${formatBytes(result.reportOnlyBytes)} total. settings, credentials, plugins, and live DBs are never cleaned.`);
+    lines.push('');
+  }
+  lines.push('Nothing was changed. scan is always read-only.');
+  lines.push('');
+  lines.push('Next:');
+  lines.push('  agent-janitor clean    # preview what would move to trash (dry run)');
   return lines.join('\n');
+}
+
+function renderDbSummary(db: DbReport): string[] {
+  if (!db.schemaGate.ok) return [`db: SCHEMA GATE FAILED — ${db.schemaGate.reason}; no DB operations possible`];
+  const out: string[] = [];
+  out.push(
+    `${'DB compaction'.padEnd(28)} ${formatBytes(db.supersededBytes + db.dupeBytes + db.freelistBytes).padStart(9)}  (${db.supersededRows} superseded + ${db.dupeRows} dupe rows, ${db.sessions.total} sessions)`,
+  );
+  if (db.staleSessions.count > 0) {
+    const s = db.staleSessions;
+    out.push(
+      `  stale sessions: ${s.count} (≈${formatBytes(s.estimatedBytes)}; $${s.totalCost.toFixed(2)} / ${fmtTokens(s.tokensInput)}in/${fmtTokens(s.tokensOutput)}out/${fmtTokens(s.tokensCacheRead)}cache would be forgotten)`,
+    );
+  }
+  return out;
 }
 
 function renderDbReport(db: DbReport): string[] {
@@ -99,13 +157,32 @@ function fmtTokens(n: number): string {
 export function renderCleanPlan(findings: Finding[], apply: boolean): string {
   const lines: string[] = [];
   const total = findings.reduce((s, f) => s + f.bytes, 0);
-  lines.push(apply ? 'agent-janitor clean — APPLY (moving to trash)' : 'agent-janitor clean — DRY RUN (nothing moved; pass --apply)');
+  lines.push(apply ? 'agent-janitor clean — APPLY (moving to trash)' : 'DRY RUN — nothing will be changed');
   lines.push('');
+  const byAdapter = new Map<string, Finding[]>();
   for (const f of findings) {
-    lines.push(`  ${padLeft(formatBytes(f.bytes), 10)}  ${pad(f.adapter, 9)} ${pad(f.kind, 14)} ${truncatePath(f.path)}`);
+    const g = byAdapter.get(f.adapter) ?? [];
+    g.push(f);
+    byAdapter.set(f.adapter, g);
   }
-  lines.push('');
-  lines.push(`  ${findings.length} item(s), ${formatBytes(total)} -> trash (~/.agent-janitor/trash)`);
+  for (const [adapter, items] of byAdapter) {
+    const bytes = items.reduce((s, f) => s + f.bytes, 0);
+    lines.push(`${adapter}`);
+    lines.push(`  ${items.length} file(s), ${formatBytes(bytes)}`);
+    for (const f of items.slice(0, 15)) {
+      lines.push(`    ${padLeft(formatBytes(f.bytes), 9)}  ${pad(f.kind, 13)} ${truncatePath(f.path, 80)}`);
+    }
+    if (items.length > 15) lines.push(`    ... and ${items.length - 15} more`);
+    lines.push('');
+  }
+  lines.push('Total:');
+  lines.push(`  ${findings.length} file(s), ${formatBytes(total)} -> trash (~/.agent-janitor/trash)`);
+  lines.push('  Nothing is permanently deleted. Restore with: agent-janitor restore --list');
+  if (!apply) {
+    lines.push('');
+    lines.push('To apply:');
+    lines.push('  agent-janitor clean --apply');
+  }
   return lines.join('\n');
 }
 
@@ -125,19 +202,31 @@ export interface VacuumDryRunView {
 
 export function renderVacuumDryRun(view: VacuumDryRunView, proofSummary: string, deleteSessionsOlderThanDays?: number): string {
   const lines: string[] = [];
-  lines.push('agent-janitor vacuum — DRY RUN (nothing changed; pass --apply)');
+  lines.push('OpenCode database vacuum');
   lines.push('');
-  lines.push(`  db: ${view.path} (${formatBytes(view.fileBytes)}, ${view.sessionsTotal} sessions)`);
+  lines.push(`Database:`);
+  lines.push(`  ${view.path} (${formatBytes(view.fileBytes)}, ${view.sessionsTotal} sessions)`);
+  lines.push('');
+  lines.push('Safety checks');
+  lines.push('  (lock probe, schema gate, and integrity check ran before this plan)');
   lines.push(`  reconstruction proof: ${proofSummary}`);
-  lines.push(`  would delete superseded snapshot events: ${view.supersededRows} rows = ${formatBytes(view.supersededBytes)}`);
-  lines.push(`  would delete byte-identical duplicates:  ${view.dupeRows} rows = ${formatBytes(view.dupeBytes)}`);
-  lines.push(`  would reclaim freelist:                  ${view.freelistPages} pages = ${formatBytes(view.freelistBytes)}`);
+  lines.push('');
+  lines.push('Plan');
+  lines.push(`  Superseded snapshots: ${view.supersededRows} rows = ${formatBytes(view.supersededBytes)}`);
+  lines.push(`  Duplicate payloads:   ${view.dupeRows} rows = ${formatBytes(view.dupeBytes)}`);
+  lines.push(`  Freelist pages:       ${view.freelistPages} pages = ${formatBytes(view.freelistBytes)}`);
   if (deleteSessionsOlderThanDays !== undefined) {
     lines.push(
-      `  would delete sessions older than ${deleteSessionsOlderThanDays}d: ${view.staleSessions} sessions ≈ ${formatBytes(view.staleSessionBytes)}`,
+      `  Sessions older than ${deleteSessionsOlderThanDays}d: ${view.staleSessions} sessions ≈ ${formatBytes(view.staleSessionBytes)} (removed, not trashed — the DB backup is the undo)`,
     );
   }
   const estimate = view.freelistBytes + view.supersededBytes + view.dupeBytes;
-  lines.push(`  then VACUUM; estimated shrink (upper bound): ${formatBytes(estimate)}`);
+  lines.push(`  Estimated reclaim (upper bound): ${formatBytes(estimate)}`);
+  lines.push('');
+  lines.push('DRY RUN — no changes made.');
+  lines.push('');
+  lines.push('Apply with:');
+  lines.push('  agent-janitor vacuum --apply');
+  lines.push('A timestamped backup is taken first (unless --no-backup).');
   return lines.join('\n');
 }
