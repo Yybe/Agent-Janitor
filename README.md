@@ -6,6 +6,8 @@ Reclaim disk space from AI coding agent harnesses — with a preview first, a tr
 
 AI coding agents hoard storage: OpenCode's SQLite DB grows to 72 GB in two weeks ([#47022]); Codex writes per-turn project-tree checkpoints into your repos' `.git` and never garbage-collects them (100+ GB cases, [#29388]); Claude Code transcripts pile up; base64 blobs sit inside session DBs ([openclaw#143973]). No harness ships retention or vacuum tooling. agent-janitor audits all of them and reclaims the space — and refuses unsafe operations instead of guessing.
 
+Example output — numbers vary by machine:
+
 ```
 $ npx agent-janitor scan
 agent-janitor v0.2.0
@@ -15,36 +17,27 @@ Scanning AI coding-agent storage... (retention 30d)
 ✓ opencode
 ✓ codex
 ✓ claude
-✓ gemini
-✓ kiro
 ✓ cursor
-✓ antigravity
-✓ copilot
-✓ cline
-✓ amp
-- roo (not found)
-- openclaw (not found)
-- continue (not found)
-- aider (not found)
 
 Reclaimable storage
 
-copilot
-Stale workspaces               1.16 GB  (93 items)
-Stale caches                    285 MB  (4 items)
-...
+opencode
+Logs                          184 MB  (3 items)
+DB compaction                 412 MB  (12,408 superseded + 3 dupe rows)
+claude
+Stale sessions                 96 MB  (21 items)
+cursor
+Stale workspaces               240 MB  (6 items)
+
 ------------------------------------
-Potential reclaimable space    3.10 GB
+Potential reclaimable space    932 MB
 ------------------------------------
-  files: 3.10 GB trash-eligible · db estimate (upper bound): 32.0 KB
 
 Nothing was changed. scan is always read-only.
 
 Next:
   agent-janitor clean    # preview what would move to trash (dry run)
 ```
-
-Output above is from a real Windows run; yours prints your own measured bytes.
 
 ## Why this exists
 
@@ -121,26 +114,24 @@ npm run dev -- scan
 Common flags: `--retention <n><d|w|m>` (default 30d), `--target <adapter>`, `--json`, `--apply`.
 Per-command help: `agent-janitor <command> --help`. Version: `agent-janitor --version`.
 
-A vacuum dry run against a large OpenCode DB prints the exact plan (row counts and
-byte totals measured from that file, proof result included). Example shape —
-numbers below are from the format, not a real run; yours prints your own DB:
+Example shape — your run prints your own measured rows and bytes:
 
 ```
 $ agent-janitor vacuum
 OpenCode database vacuum
 
 Database:
-  /path/to/opencode.db (1.91 GB, 156 sessions)
+  /path/to/opencode.db (856 MB, 142 sessions)
 
 Safety checks
   (lock probe, schema gate, and integrity check ran before this plan)
-  reconstruction proof: PASS — 8448 messages + 36794 parts verified identical to newest snapshots
+  reconstruction proof: PASS — 6,120 messages + 28,400 parts verified identical to newest snapshots
 
 Plan
-  Superseded snapshots: 90909 rows = 1.42 GB
-  Duplicate payloads:   66 rows = 132 MB
-  Freelist pages:       8 pages = 32.0 KB
-  Estimated reclaim (upper bound): 1.55 GB
+  Superseded snapshots: 41,300 rows = 620 MB
+  Duplicate payloads:   12 rows = 48 MB
+  Freelist pages:       6 pages = 24.0 KB
+  Estimated reclaim (upper bound): 668 MB
 
 DRY RUN — no changes made.
 ```
@@ -173,7 +164,7 @@ Every command accepts `--json`: stable structured objects (`{command, version, d
 
 ## Compatibility
 
-OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). Harnesses: OpenCode, Codex CLI, Claude Code, Gemini CLI, Kiro, Cursor, Antigravity, Copilot, Cline, Amp, Roo-Code, OpenClaw, Continue, Aider — each detected independently; missing harnesses show `(not found)` and are skipped. `scan` is stat-only and parallel: ~1.4s wall time on a real machine with 10 harnesses and 3.1 GB reclaimable.
+OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). Harnesses: OpenCode, Codex CLI, Claude Code, Gemini CLI, Kiro, Cursor, Antigravity, Copilot, Cline, Amp, Roo-Code, OpenClaw, Continue, Aider — each detected independently; missing ones are skipped quietly. `scan` is stat-only and parallel (no file contents read).
 
 ## Limitations
 
