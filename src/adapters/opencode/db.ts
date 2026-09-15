@@ -34,6 +34,75 @@ function openReadOnly(dbPath: string): DatabaseSync {
   return new DatabaseSync(dbPath, { readOnly: true });
 }
 
+/**
+ * P0 fast path for `scan`: PRAGMAs + COUNTs only, never reads payload bytes.
+ * Full byte accounting (superseded/dupe/stale sums) stays in analyzeOpencodeDb,
+ * which `vacuum` (dry run) uses where slowness is expected.
+ */
+export async function quickOpencodeDbStats(dbPath: string): Promise<DbReport | undefined> {
+  let gate: ReturnType<typeof schemaGate>;
+  try {
+    const db = openReadOnly(dbPath);
+    try {
+      gate = schemaGate(db);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return undefined;
+  }
+  if (!gate.ok) return undefined;
+  let fileBytes = 0;
+  try {
+    fileBytes = (await fsp.stat(dbPath)).size;
+  } catch {
+    return undefined;
+  }
+  const out: DbReport = {
+    path: dbPath,
+    fileBytes,
+    pageCount: 0,
+    pageSize: 4096,
+    freelistPages: 0,
+    freelistBytes: 0,
+    eventTypes: [],
+    totalEventRows: 0,
+    totalEventBytes: 0,
+    supersededRows: 0,
+    supersededBytes: 0,
+    dupeRows: 0,
+    dupeBytes: 0,
+    sessions: { total: 0, oldestMs: 0, newestMs: 0 },
+    staleSessions: { count: 0, estimatedBytes: 0, totalCost: 0, tokensInput: 0, tokensOutput: 0, tokensCacheRead: 0 },
+    vacuumEstimateBytes: 0,
+    schemaGate: gate,
+  };
+  const db = openReadOnly(dbPath);
+  try {
+    const page = db.prepare('PRAGMA page_count').get() as { page_count?: number };
+    const size = db.prepare('PRAGMA page_size').get() as { page_size?: number };
+    const free = db.prepare('PRAGMA freelist_count').get() as { freelist_count?: number };
+    out.pageCount = Number(page?.page_count ?? 0);
+    out.pageSize = Number(size?.page_size ?? 4096);
+    out.freelistPages = Number(free?.freelist_count ?? 0);
+    out.freelistBytes = out.freelistPages * out.pageSize;
+    const types = db.prepare('SELECT type, COUNT(*) AS rows FROM event GROUP BY type ORDER BY rows DESC').all() as Array<{
+      type: string;
+      rows: number;
+    }>;
+    out.eventTypes = types.map((t) => ({ type: t.type, rows: Number(t.rows), bytes: 0 }));
+    out.totalEventRows = out.eventTypes.reduce((a, t) => a + t.rows, 0);
+    const sess = db
+      .prepare('SELECT COUNT(*) AS n, MIN(time_updated) AS oldest, MAX(time_updated) AS newest FROM session')
+      .get() as { n: number; oldest: number | null; newest: number | null };
+    out.sessions = { total: Number(sess.n), oldestMs: Number(sess.oldest ?? 0), newestMs: Number(sess.newest ?? 0) };
+    out.vacuumEstimateBytes = out.freelistBytes; // exact byte plan comes from vacuum dry run
+    return out;
+  } finally {
+    db.close();
+  }
+}
+
 export async function analyzeOpencodeDb(dbPath: string, retentionDays: number): Promise<DbReport> {
   let gate: ReturnType<typeof schemaGate>;
   try {

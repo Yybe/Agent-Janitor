@@ -8,25 +8,35 @@ AI coding agents hoard storage: OpenCode's SQLite DB grows to 72 GB in two weeks
 
 ```
 $ npx agent-janitor scan
-agent-janitor v0.1.0
+agent-janitor v0.2.0
 
-Scanning AI coding-agent storage...
+Scanning AI coding-agent storage... (retention 30d)
 
 ✓ opencode
 ✓ codex
 ✓ claude
 ✓ gemini
+✓ kiro
+✓ cursor
+✓ antigravity
+✓ copilot
+✓ cline
+✓ amp
+- roo (not found)
+- openclaw (not found)
+- continue (not found)
+- aider (not found)
 
 Reclaimable storage
 
-opencode
-DB compaction               1.52 GB  (90975 superseded + 66 dupe rows)
-claude
-Stale sessions                157 MB  (118 items)
-
+copilot
+Stale workspaces               1.16 GB  (93 items)
+Stale caches                    285 MB  (4 items)
+...
 ------------------------------------
-Potential reclaimable space    1.7 GB
+Potential reclaimable space    3.10 GB
 ------------------------------------
+  files: 3.10 GB trash-eligible · db estimate (upper bound): 32.0 KB
 
 Nothing was changed. scan is always read-only.
 
@@ -34,7 +44,7 @@ Next:
   agent-janitor clean    # preview what would move to trash (dry run)
 ```
 
-Numbers above are illustrative — your run prints real measured bytes.
+Output above is from a real Windows run; yours prints your own measured bytes.
 
 ## Why this exists
 
@@ -111,16 +121,28 @@ npm run dev -- scan
 Common flags: `--retention <n><d|w|m>` (default 30d), `--target <adapter>`, `--json`, `--apply`.
 Per-command help: `agent-janitor <command> --help`. Version: `agent-janitor --version`.
 
-A real vacuum run on a 2.05 GB OpenCode DB:
+A vacuum dry run against a large OpenCode DB prints the exact plan (row counts and
+byte totals measured from that file, proof result included). Example shape —
+numbers below are from the format, not a real run; yours prints your own DB:
 
 ```
-$ agent-janitor vacuum --db opencode.db --apply
-  proof passed: 8448 messages + 36794 parts newest snapshots == live rows
-  dupe: 1 byte-identical 133954749-byte payload(s) queued for deletion
-  ...
-applied: 66 duplicate rows + 90909 superseded rows deleted, 0 sessions removed
-size: 1.91 GB -> 769 MB (freed 1.16 GB)
-integrity: ok -> ok
+$ agent-janitor vacuum
+OpenCode database vacuum
+
+Database:
+  /path/to/opencode.db (1.91 GB, 156 sessions)
+
+Safety checks
+  (lock probe, schema gate, and integrity check ran before this plan)
+  reconstruction proof: PASS — 8448 messages + 36794 parts verified identical to newest snapshots
+
+Plan
+  Superseded snapshots: 90909 rows = 1.42 GB
+  Duplicate payloads:   66 rows = 132 MB
+  Freelist pages:       8 pages = 32.0 KB
+  Estimated reclaim (upper bound): 1.55 GB
+
+DRY RUN — no changes made.
 ```
 
 ## What it cleans
@@ -132,12 +154,18 @@ integrity: ok -> ok
 | OpenCode | whole sessions (`--delete-sessions-older-than`, opt-in) | delete (backup is the undo) | $ / token receipts printed first; sessions permanently removed |
 | Codex CLI | session rollouts older than retention, `*.tmp-*` junk | move to trash | resume history for those sessions lost (restorable) |
 | Codex CLI | `refs/codex/turn-diffs/*` checkpoint refs older than retention | delete refs + `git gc` | per-turn rewind for affected old sessions forfeited |
-| Claude Code | transcripts / project session dirs older than retention | move to trash | old session history lost (restorable) |
-| Gemini CLI | `tmp` dir older than retention | move to trash | temp files lost (restorable) |
+| Claude Code | transcripts / project session dirs older than retention, orphan project caches (source path gone), stale `usage-data`/`backups`/`feedback-bundles`/`debug`/`file-history`/`shell-snapshots`/`todos`/`tasks`/`plans`/`paste-cache`/`telemetry`/`cache`/`downloads`, `history.jsonl` over 500 lines, old `.claude.json.backup*` | move to trash | old session history lost (restorable) |
+| Gemini CLI | `tmp`/`cache`/`logs`/`sessions`/`checkpoints`/`history` dirs older than retention | move to trash | temp/session files lost (restorable) |
+| Kiro | `sessions/<ws>/<sess>` bundles + `session-index/*.jsonl` older than retention, old `logs/*` run dirs | move to trash | resume history for those sessions lost (restorable) |
+| Kiro IDE / Cursor / Antigravity / VS Code (Copilot host) / Roo | `User/workspaceStorage/<old-hash>` dirs, `logs`, `Crashpad`, `CachedData`, `Code Cache`, `GPUCache` | move to trash | that folder's chat/composer history + extension UI state lost (restorable); quit the app first |
+| Antigravity agent | `~/.gemini/antigravity/conversations/*.pb|*.db` older than retention, `browser_recordings/*`, `crashes/*` | move to trash | old conversation snapshots and recordings lost (restorable) |
+| Copilot CLI | `~/.copilot/logs/*`, old `media-cache` | move to trash | logs lost (restorable); live `data.db` never touched |
+| Cline | `.cline/data/workspaces/<old>` dirs | move to trash | old task workspace state lost (restorable) |
+| Amp | `.amp/file-changes/<old>` snapshot dirs | move to trash | old file-change snapshots lost (restorable) |
 
 ## What is NEVER touched
 
-Settings, credentials, plugins, installed plugin dependencies, `CLAUDE.md`, skills, prompt history, harness-managed caches, live SQLite sets (`logs_2.sqlite`, `queue_1.sqlite`, `state_5.sqlite`), Claude Code native-retention dirs (`shell-snapshots`, `todos`, `statsig`, `debug`), user git refs outside `refs/codex/turn-diffs/`. These appear as `report-only` in `scan` — measured, never queued.
+Settings, credentials, plugins, installed plugin dependencies, `CLAUDE.md`, skills, prompt history, harness-managed caches, live SQLite sets (`logs_2.sqlite`, `queue_1.sqlite`, `state_5.sqlite`, copilot `data.db`, cline `sessions.db`), Kiro `steering`/`settings`/`skills`/`powers`, Gemini `settings.json`/`GEMINI.md`/`oauth_creds.json`, Claude `settings.json`/`.credentials.json`/`skills`/`commands`/`agents`/`ide`, user git refs outside `refs/codex/turn-diffs/`. These appear as `report-only` in `scan` — measured, never queued. Claude `settings.json` without `cleanupPeriodDays` earns a nudge to set native retention.
 
 ## JSON output
 
@@ -145,7 +173,7 @@ Every command accepts `--json`: stable structured objects (`{command, version, d
 
 ## Compatibility
 
-OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). Harnesses: OpenCode, Codex CLI, Claude Code, Gemini CLI — each detected independently; missing harnesses show `(not found)` and are skipped.
+OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). Harnesses: OpenCode, Codex CLI, Claude Code, Gemini CLI, Kiro, Cursor, Antigravity, Copilot, Cline, Amp, Roo-Code, OpenClaw, Continue, Aider — each detected independently; missing harnesses show `(not found)` and are skipped. `scan` is stat-only and parallel: ~1.4s wall time on a real machine with 10 harnesses and 3.1 GB reclaimable.
 
 ## Limitations
 

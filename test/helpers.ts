@@ -26,10 +26,21 @@ export interface RunResult {
 
 /** Run the built CLI with a fake home (USERPROFILE on Windows, HOME elsewhere). */
 export function runCli(homeRoot: string, args: string[], timeoutMs = 120_000): RunResult {
+  const fakeAppData = path.join(homeRoot, 'AppData', 'Roaming');
   const res = spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
     timeout: timeoutMs,
-    env: { ...process.env, USERPROFILE: homeRoot, HOME: homeRoot },
+    env: {
+      ...process.env,
+      JANITOR_HOME: homeRoot,
+      JANITOR_APPDATA: fakeAppData,
+      USERPROFILE: homeRoot,
+      HOME: homeRoot,
+      APPDATA: fakeAppData,
+      LOCALAPPDATA: path.join(homeRoot, 'AppData', 'Local'),
+      XDG_CONFIG_HOME: path.join(homeRoot, '.config'),
+      XDG_DATA_HOME: path.join(homeRoot, '.local', 'share'),
+    },
   });
   return { status: res.status ?? -1, stdout: res.stdout ?? '', stderr: res.stderr ?? '' };
 }

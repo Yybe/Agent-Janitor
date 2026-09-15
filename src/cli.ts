@@ -21,7 +21,7 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-const HELP = `agent-janitor v${VERSION} — reclaim disk space from AI coding agent harnesses (opencode, codex, claude, gemini)
+const HELP = `agent-janitor v${VERSION} — reclaim disk space from AI coding agent harnesses (opencode, codex, claude, gemini, kiro, cursor, antigravity, copilot, cline, amp, roo, openclaw, continue, aider)
 
 usage:
   agent-janitor scan [--target <adapter>] [--retention <30d>] [--json]
@@ -62,7 +62,7 @@ run 'agent-janitor <command> --help' for details on one command.
 
 const SCAN_HELP = `agent-janitor scan — read-only audit. never changes anything.
 
-usage: agent-janitor scan [--target <opencode|codex|claude|gemini>] [--retention <30d>] [--json]
+usage: agent-janitor scan [--target <adapter>] [--retention <30d>] [--json]
 
   --retention <n><d|w|m>  age cutoff used to flag old items (default 30d)
   --target <adapter>      audit only one harness
@@ -204,7 +204,22 @@ function parse(): CliArgs {
 
 function adapterFromTarget(target: string | undefined): AdapterId | undefined {
   if (target === undefined) return undefined;
-  const valid: AdapterId[] = ['opencode', 'codex', 'claude', 'gemini'];
+  const valid: AdapterId[] = [
+    'opencode',
+    'codex',
+    'claude',
+    'gemini',
+    'kiro',
+    'cursor',
+    'antigravity',
+    'copilot',
+    'cline',
+    'amp',
+    'roo',
+    'openclaw',
+    'continue',
+    'aider',
+  ];
   if (!valid.includes(target as AdapterId)) fail(`--target must be one of: ${valid.join(', ')}`);
   return target as AdapterId;
 }

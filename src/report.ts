@@ -27,7 +27,15 @@ function age(mtimeMs: number | undefined): string {
 function kindLabel(kind: string): string {
   const map: Record<string, string> = {
     'snapshot-dir': 'Superseded snapshots',
+    'session-dir': 'Stale sessions',
     'session-file': 'Stale sessions',
+    'workspace-dir': 'Stale workspaces',
+    'orphan-project': 'Orphan project caches',
+    'cache-dir': 'Stale caches',
+    'history-log': 'Overgrown history',
+    conversation: 'Stale conversations',
+    recording: 'Stale recordings',
+    'crash-log': 'Crash logs',
     log: 'Logs',
     'tmp-junk': 'Temp files',
     'stale-backup': 'Stale backups',

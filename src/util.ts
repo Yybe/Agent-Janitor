@@ -17,7 +17,15 @@ export function formatBytes(n: number): string {
 }
 
 export function home(...segments: string[]): string {
-  return path.join(os.homedir(), ...segments);
+  // test seam: fake homes inject via env (see test/helpers.ts runCli)
+  const base = process.env.JANITOR_HOME ?? process.env.USERPROFILE ?? process.env.HOME ?? os.homedir();
+  return path.join(base, ...segments);
+}
+
+/** Windows %APPDATA% (Roaming), else ~/.config. Where Electron/VS-Code-family apps live. */
+export function appData(...segments: string[]): string {
+  const base = process.env.JANITOR_APPDATA ?? process.env.APPDATA ?? home('.config');
+  return path.join(base, ...segments);
 }
 
 export function exists(p: string): boolean {
@@ -38,61 +46,140 @@ export async function statSafe(p: string): Promise<{ bytes: number; mtimeMs: num
   }
 }
 
-/** Recursively measure the size of a file or directory. Missing paths → 0. */
-export async function deepSize(p: string, symlinkBudget = { left: 64 }): Promise<number> {
-  let st;
-  try {
-    st = await fsp.lstat(p);
-  } catch {
-    return 0;
-  }
-  if (st.isSymbolicLink()) {
-    if (symlinkBudget.left-- <= 0) return 0;
-    try {
-      const real = await fsp.stat(p);
-      if (real.isFile()) return real.size;
-    } catch {
-      return 0;
+/** Run tasks with at most `n` in flight. Zero deps, enough for sibling-dir fan-out. */
+async function parallel<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  const workers = new Array(Math.min(n, items.length)).fill(0).map(async () => {
+    while (i < items.length) {
+      const k = i++;
+      out[k] = await fn(items[k]!);
     }
-    return 0;
-  }
-  if (st.isFile()) return st.size;
-  let total = 0;
-  let entries;
-  try {
-    entries = await fsp.readdir(p, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-  for (const e of entries) {
-    // dotfiles included on purpose: hidden caches are exactly what we hunt
-    total += await deepSize(path.join(p, e.name), symlinkBudget);
-    if (total > Number.MAX_SAFE_INTEGER / 2) break;
-  }
-  return total;
+  });
+  await Promise.all(workers);
+  return out;
 }
 
-/** Newest mtime within a directory tree (0 when unknown). */
-export async function newestMtime(p: string, depth = 3): Promise<number> {
-  let st;
-  try {
-    st = await fsp.stat(p);
-  } catch {
-    return 0;
+/** One iterative stat-only pass: total bytes + newest mtime + counts. Never reads file contents. */
+export interface WalkStats {
+  bytes: number;
+  newestMtimeMs: number;
+  files: number;
+  dirs: number;
+}
+
+function mergeWalk(a: WalkStats, b: WalkStats): WalkStats {
+  return {
+    bytes: a.bytes + b.bytes,
+    newestMtimeMs: Math.max(a.newestMtimeMs, b.newestMtimeMs),
+    files: a.files + b.files,
+    dirs: a.dirs + b.dirs,
+  };
+}
+
+async function walkOne(entry: string, symlinkBudget: { left: number }): Promise<WalkStats> {
+  const out: WalkStats = { bytes: 0, newestMtimeMs: 0, files: 0, dirs: 0 };
+  const stack: string[] = [entry];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    let st;
+    try {
+      st = await fsp.lstat(cur);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink()) {
+      if (symlinkBudget.left-- <= 0) continue;
+      try {
+        const real = await fsp.stat(cur);
+        if (real.isFile()) {
+          out.bytes += real.size;
+          out.files++;
+          if (real.mtimeMs > out.newestMtimeMs) out.newestMtimeMs = real.mtimeMs;
+        }
+      } catch {
+        /* dangling — skip */
+      }
+      continue;
+    }
+    if (st.isFile()) {
+      out.bytes += st.size;
+      out.files++;
+      if (st.mtimeMs > out.newestMtimeMs) out.newestMtimeMs = st.mtimeMs;
+      continue;
+    }
+    if (!st.isDirectory()) continue;
+    out.dirs++;
+    if (st.mtimeMs > out.newestMtimeMs) out.newestMtimeMs = st.mtimeMs;
+    const base = cur.split(/[\\/]/).pop() ?? '';
+    // ponytail: skip-list ceiling is node_modules/.git only; extend when real stores hit it
+    if (base === 'node_modules' || base === '.git') continue;
+    let entries;
+    try {
+      entries = await fsp.readdir(cur);
+    } catch {
+      continue;
+    }
+    for (const e of entries) stack.push(path.join(cur, e));
   }
-  let newest = st.mtimeMs;
-  if (depth <= 0) return newest;
+  return out;
+}
+
+export async function walkSize(root: string): Promise<WalkStats> {
+  let rootSt;
+  try {
+    rootSt = await fsp.lstat(root);
+  } catch {
+    return { bytes: 0, newestMtimeMs: 0, files: 0, dirs: 0 };
+  }
+  if (!rootSt.isDirectory() || rootSt.isSymbolicLink()) return walkOne(root, { left: 64 });
   let entries;
   try {
-    entries = await fsp.readdir(p, { withFileTypes: true });
+    entries = await fsp.readdir(root);
   } catch {
-    return newest;
+    return { bytes: 0, newestMtimeMs: 0, files: 0, dirs: 0 };
   }
-  for (const e of entries) {
-    const childNewest = await newestMtime(path.join(p, e.name), depth - 1);
-    if (childNewest > newest) newest = childNewest;
+  // fan out over immediate children (16-way): workspaceStorage/<97 hashes> sizes in parallel
+  const parts = await parallel(entries, 16, (e) => walkOne(path.join(root, e), { left: 64 }));
+  let out: WalkStats = { bytes: 0, newestMtimeMs: rootSt.mtimeMs, files: 0, dirs: 1 };
+  for (const p of parts) out = mergeWalk(out, p);
+  return out;
+}
+
+export interface FileStat {
+  path: string;
+  bytes: number;
+  mtimeMs: number;
+}
+
+/** Iterative per-file listing under root (stat only, no content reads). Sorted by path for stable output. */
+export async function collectFiles(root: string, maxDepth = 8): Promise<FileStat[]> {
+  const out: FileStat[] = [];
+  const stack: Array<{ p: string; d: number }> = [{ p: root, d: 0 }];
+  while (stack.length > 0) {
+    const { p, d } = stack.pop()!;
+    let st;
+    try {
+      st = await fsp.lstat(p);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink()) continue; // never chase symlinks in scans
+    if (st.isFile()) {
+      out.push({ path: p, bytes: st.size, mtimeMs: st.mtimeMs });
+      continue;
+    }
+    if (!st.isDirectory() || d >= maxDepth) continue;
+    let entries;
+    try {
+      entries = await fsp.readdir(p);
+    } catch {
+      continue;
+    }
+    for (const e of entries) stack.push({ p: path.join(p, e), d: d + 1 });
   }
-  return newest;
+  out.sort((a, b) => (a.path < b.path ? -1 : 1));
+  return out;
 }
 
 /** Parse '30d' | '2w' | '1m' | '365' into days. */

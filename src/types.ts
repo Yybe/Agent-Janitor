@@ -1,4 +1,18 @@
-export type AdapterId = 'opencode' | 'codex' | 'claude' | 'gemini';
+export type AdapterId =
+  | 'opencode'
+  | 'codex'
+  | 'claude'
+  | 'gemini'
+  | 'kiro'
+  | 'cursor'
+  | 'antigravity'
+  | 'copilot'
+  | 'cline'
+  | 'amp'
+  | 'openclaw'
+  | 'continue'
+  | 'aider'
+  | 'roo';
 
 export type FindingCategory = 'trash' | 'report-only';
 
