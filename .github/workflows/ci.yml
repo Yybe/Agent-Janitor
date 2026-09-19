@@ -23,3 +23,12 @@ jobs:
       - run: npm run build
       - run: node dist/cli.js help
       - run: node dist/cli.js scan
+      - name: install the packed tarball and run it
+        # catches a wrong "files" list, which only bites users after publish
+        shell: bash
+        run: |
+          npm pack
+          npm install -g ./agent-janitor-*.tgz
+          agent-janitor --version
+          agent-janitor scan
+          npm uninstall -g agent-janitor

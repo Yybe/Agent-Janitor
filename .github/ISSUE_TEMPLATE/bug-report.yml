@@ -1,0 +1,48 @@
+name: Bug report
+description: Something scanned, moved, or refused incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        If agent-janitor deleted something you wanted back, say so plainly — a delete that
+        should have been a keep is the highest-priority bug here, and `restore --list` may
+        still have it.
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Exact command, including flags. Paste `--json` output where the command supports it.
+      render: shell
+      placeholder: agent-janitor clean --target cursor --apply
+    validations: {required: true}
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Full stdout and stderr.
+      render: shell
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: Include the path and why you believe the tool is wrong about it.
+    validations: {required: true}
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS and version, Node version (`node -v`), agent-janitor version, harness versions involved.
+      value: |
+        OS:
+        Node:
+        agent-janitor:
+        Harness:
+    validations: {required: true}
+  - type: dropdown
+    id: trash
+    attributes:
+      label: Is the file still in the trash?
+      description: "`agent-janitor restore --list`"
+      options: [Yes, No, 'Did not run with --apply']

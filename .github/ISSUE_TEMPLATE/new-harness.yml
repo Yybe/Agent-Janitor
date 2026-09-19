@@ -1,0 +1,57 @@
+name: Support a new harness
+description: Add an AI coding agent / IDE to the adapter list
+labels: [adapter, good-first-issue]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Every path must come from a primary source. A plausible guess is worse than no
+        adapter: this tool moves files.
+  - type: input
+    id: harness
+    attributes:
+      label: Harness
+      description: Name, vendor, and where it is installed from (npm / brew / installer).
+    validations: {required: true}
+  - type: textarea
+    id: paths
+    attributes:
+      label: Storage paths, per OS
+      description: >
+        Absolute path templates for Linux, macOS and Windows, and for each one say whether it is
+        a regenerable cache, session data, or precious config/credentials.
+      placeholder: |
+        Linux  ~/.local/share/<name>/sessions   session transcripts (safe to trash with warning)
+        macOS  ~/Library/Logs/<name>            logs (regenerable)
+        Win    %APPDATA%\<name>\config.json     PRECIOUS
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >
+        Links proving those paths — the harness's own source (file + the path constant), official
+        docs, or an issue/discussion where a user prints the real directory. Paste the literal
+        constant where you can.
+      placeholder: https://github.com/vendor/product/blob/main/src/paths.ts#L42 — `dirs::data_dir().join("product")`
+    validations: {required: true}
+  - type: dropdown
+    id: db
+    attributes:
+      label: Does it store sessions in a SQLite database?
+      description: Live databases are report-only; agent-janitor never deletes rows outside `vacuum`.
+      options: [Yes, No, Unsure]
+    validations: {required: true}
+  - type: textarea
+    id: bloat
+    attributes:
+      label: How big does it get, and what never gets pruned?
+      description: Real numbers from your machine, or a link to a bug report about the growth.
+      placeholder: 41 GB in ~/.local/share/<name> after 6 weeks; the harness prunes nothing.
+  - type: textarea
+    id: native
+    attributes:
+      label: Any native retention setting we should nudge instead?
+      description: >
+        Claude Code has `cleanupPeriodDays`, for example. If the harness can clean up after itself,
+        say so — the adapter may only need to point at the setting.
