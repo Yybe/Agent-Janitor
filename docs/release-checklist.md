@@ -1,14 +1,19 @@
 # Release checklist
 
 Publishing is automated: pushing a `v*` tag runs `.github/workflows/release.yml`, which builds,
-tests and runs `npm publish` with provenance on `ubuntu-latest`. It needs one repo secret.
+tests and runs `npm publish` with provenance on `ubuntu-latest`. Nothing else publishes: the
+registry only accepts the tag run once the account has a publish credential.
 
-- [ ] `secrets.NPM_TOKEN` exists and can publish. Either an npm automation token (npm dashboard →
-      Access Tokens → "Read and publish", 2FA required on the account), or trusted publishing, in
-      which case delete the `NODE_AUTH_TOKEN` line so npm falls back to the OIDC token the
-      workflow already requests. The first publish of a brand-new package name usually has to use
-      an automation token, because a granular token cannot be scoped to a package that does not
-      exist yet.
+- [ ] A publish credential exists for the account. Order matters:
+      1. **First publish only** — npm's trusted publishing cannot create a package, so version 1
+         has to come from a token: `npm login` locally and `npm publish --access public
+         --no-provenance`, or put an npm automation token in `secrets.NPM_TOKEN` and let the tag
+         run publish it.
+      2. **Every publish after that** — switch to trusted publishing (npm dashboard → Publishing
+         from CI → add `Yybe/Agent-Janitor` + `release.yml`), then delete the `NPM_TOKEN` guard and
+         the `NODE_AUTH_TOKEN` line below it; `id-token: write` is already set. Tokens that bypass
+         2FA are being restricted for direct publishing in January 2027, so this is the route that
+         keeps working, and it produces provenance attestations for free.
 - [ ] After a failed tag run there is no need to re-tag: fix the secret, then "Re-run failed jobs"
       on the Actions run for that tag.
 - [ ] `npm install` clean, `npm test` green (Linux/macOS/Windows via CI)
