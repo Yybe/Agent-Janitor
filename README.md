@@ -48,6 +48,9 @@ Session transcripts, rollout logs, snapshot dirs, and event-sourced DB rows accu
 - `scan` is always read-only.
 - `clean`, `vacuum`, `codex-gc` are dry-run by default; `--apply` is required.
 - Files are moved to `~/.agent-janitor/trash` with a manifest — never deleted. `restore` puts them back.
+- The trash is not forever and does not silently grow: `agent-janitor trash` shows every item's age,
+  `trash --apply` permanently deletes only what is past `--retention`. That is the only command in the
+  tool that destroys data, and it is dry-run first like everything else.
 - `vacuum` takes a timestamped DB backup (default on) and checks integrity before and after.
 - `vacuum` runs a reconstruction proof: every live row must match its newest snapshot, else abort with zero changes.
 - Locked DBs (WAL/SHM present) are refused. Unknown schemas fail closed. Unknown-age files are kept.
@@ -60,7 +63,7 @@ Full contract: [docs/safety.md](docs/safety.md).
 ### 1. Check what can be reclaimed (always safe)
 
 ```
-npx agent-janitor scan
+npx github:Yybe/Agent-Janitor scan
 ```
 
 ### 2. Preview cleanup (changes nothing)
@@ -87,16 +90,20 @@ npx agent-janitor restore <id>
 Requires Node ≥ 22.5 (uses the built-in `node:sqlite`). Zero runtime dependencies.
 
 ```bash
-npx agent-janitor scan          # try without installing
-npm install -g agent-janitor    # or install globally
+npx github:Yybe/Agent-Janitor scan  # run straight from GitHub, nothing installed
+npm install -g agent-janitor        # once the name is published to npm (not yet — v0.3)
 ```
+
+The `agent-janitor` name is not on the npm registry yet, so `npx agent-janitor` 404s until
+the first tagged publish (`.github/workflows/release.yml`). Everything below assumes a
+global install or `npm link`.
 
 Local development:
 
 ```bash
 git clone https://github.com/Yybe/Agent-Janitor.git
-cd Agent-Janitor/agent-janitor   # or wherever the package root is
-npm install
+cd Agent-Janitor
+npm install     # prepare script builds dist/
 npm test
 npm run dev -- scan
 ```
@@ -108,6 +115,7 @@ npm run dev -- scan
 | `scan` | Read-only audit: per-harness, per-cause reclaimable bytes, event-table stats, duplicate payloads, stale sessions (with the $ and tokens they represent) | never |
 | `clean` | Move trash-eligible files (old transcripts, session rollouts, snapshots, logs, stale backups) to `~/.agent-janitor/trash` with a manifest | dry-run default; `--apply` required |
 | `restore --list` / `restore <id>` | Show trash / put a trashed item back exactly where it was | never destructive (refuses overwrites) |
+| `trash` / `trash --apply` | Show what is in trash and how old it is; `--apply` permanently deletes only items past `--retention` (default 30d) | dry-run default; `--apply` is the only real delete in the tool |
 | `vacuum` | OpenCode DB surgery: delete **superseded snapshot events** + byte-identical duplicate payloads, then `VACUUM` | dry-run default; backup + proof gated |
 | `codex-gc` | Delete old Codex turn-diff checkpoint refs in a git repo, then `git gc --prune=now` | dry-run default; **forfeits per-turn rewind for affected old sessions** |
 
@@ -164,7 +172,22 @@ Every command accepts `--json`: stable structured objects (`{command, version, d
 
 ## Compatibility
 
-OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). Harnesses: OpenCode, Codex CLI, Claude Code, Gemini CLI, Kiro, Cursor, Antigravity, Copilot, Cline, Amp, Roo-Code, OpenClaw, Continue, Aider — each detected independently; missing ones are skipped quietly. `scan` is stat-only and parallel (no file contents read).
+OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). VS-Code-family apps are read from
+`~/Library/Application Support` on macOS, `%APPDATA%` on Windows, `$XDG_CONFIG_HOME` on Linux.
+`scan` is stat-only and parallel (no file contents read).
+
+Harnesses fall into three tiers, and the difference matters:
+
+- **Cleaned** — OpenCode, Codex CLI, Claude Code, Gemini CLI, Kiro, Cursor, Antigravity, Copilot CLI,
+  Cline, Amp, Roo-Code. Paths measured, old items queued for trash.
+- **Detected only** — OpenClaw, Continue. The tool confirms the harness's home directory exists and
+  reports its precious files, but does not yet clean it: the session/log layout is not verified from a
+  primary source, and a guessed path is how a cleanup tool eats your data.
+- **Reported only** — Aider. Its history lives per repository (`.aider.chat.history.md`, `.aider.db`),
+  so there is no global store to audit; agent-janitor only points at the config it finds.
+
+Missing harnesses are skipped quietly. Want one added and know its real storage paths?
+Open an issue with a source link — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Limitations
 

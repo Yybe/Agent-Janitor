@@ -1,7 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type { AdapterId, Finding } from '../types.js';
-import { appData, collectFiles, exists, home, walkSize } from '../util.js';
+import { appData, collectFiles, exists, home, localData, walkSize } from '../util.js';
 
 const DAY = 86_400_000;
 
@@ -471,9 +471,7 @@ export async function scanCursor(retentionDays: number): Promise<Finding[]> {
   const out: Finding[] = [];
   const cutoff = Date.now() - retentionDays * DAY;
   out.push(...(await scanVscodeFamily('cursor', [appData('Cursor')], cutoff)));
-  // updater caches in LOCALAPPDATA (sibling of %APPDATA%)
-  const updater = path.join(path.dirname(appData('x')), '..', 'Local', 'cursor-updater');
-  const f = await dirFinding('cursor', 'cache-dir', updater, 'cursor updater cache', true, cutoff);
+  const f = await dirFinding('cursor', 'cache-dir', localData('cursor-updater'), 'cursor updater cache', true, cutoff);
   if (f) out.push(f);
   if (out.length === 0 && !exists(appData('Cursor'))) return out;
   return out;

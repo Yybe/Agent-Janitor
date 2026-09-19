@@ -22,9 +22,32 @@ export function home(...segments: string[]): string {
   return path.join(base, ...segments);
 }
 
-/** Windows %APPDATA% (Roaming), else ~/.config. Where Electron/VS-Code-family apps live. */
+/**
+ * Electron / VS-Code-family app data root, per OS:
+ * Windows `%APPDATA%` (Roaming), macOS `~/Library/Application Support`, Linux `$XDG_CONFIG_HOME` or `~/.config`.
+ */
 export function appData(...segments: string[]): string {
-  const base = process.env.JANITOR_APPDATA ?? process.env.APPDATA ?? home('.config');
+  const env = process.env;
+  const base =
+    env.JANITOR_APPDATA ??
+    (process.platform === 'win32'
+      ? env.APPDATA ?? home('AppData', 'Roaming')
+      : process.platform === 'darwin'
+        ? home('Library', 'Application Support')
+        : env.XDG_CONFIG_HOME ?? home('.config'));
+  return path.join(base, ...segments);
+}
+
+/** Updater / crash / cache root: Windows `%LOCALAPPDATA%`, macOS `~/Library/Caches`, Linux `$XDG_CACHE_HOME` or `~/.cache`. */
+export function localData(...segments: string[]): string {
+  const env = process.env;
+  const base =
+    env.JANITOR_LOCALDATA ??
+    (process.platform === 'win32'
+      ? env.LOCALAPPDATA ?? home('AppData', 'Local')
+      : process.platform === 'darwin'
+        ? home('Library', 'Caches')
+        : env.XDG_CACHE_HOME ?? home('.cache'));
   return path.join(base, ...segments);
 }
 

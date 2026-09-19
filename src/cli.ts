@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+import './core/quiet.js';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
-import { scanAll } from './core/scan.js';
+import { scanAll, ADAPTER_IDS } from './core/scan.js';
 import { renderScan, renderCleanPlan, renderVacuumDryRun } from './report.js';
-import { moveToTrash, restoreFromTrash, listTrash, type TrashEntry } from './core/trash.js';
+import { moveToTrash, restoreFromTrash, listTrash, pruneTrash, trashRoot, type TrashEntry } from './core/trash.js';
 import { isOldEnough } from './adapters/files.js';
 import { defaultOpencodeDbPath, vacuumOpencodeDb } from './adapters/opencode/db.js';
 import { isGitRepo, planCodexGc, applyCodexGc } from './adapters/codex/checkpoints.js';
@@ -27,6 +28,7 @@ usage:
   agent-janitor scan [--target <adapter>] [--retention <30d>] [--json]
   agent-janitor clean [--target <adapter>] [--retention <30d>] [--apply] [--json]
   agent-janitor restore --list [--json] | restore <id>
+  agent-janitor trash [--retention <30d>] [--apply] [--json]
   agent-janitor vacuum [--db <path>] [--retention <30d>] [--delete-sessions-older-than <90d>]
                        [--apply] [--no-backup] [--skip-proof] [--json]
   agent-janitor codex-gc [--repo <path>] [--retention <30d>] [--apply] [--json]
@@ -38,6 +40,8 @@ commands:
   clean    move trash-eligible files to ~/.agent-janitor/trash (dry-run by default).
            never touches databases — use vacuum for that.
   restore  put a trashed item back where it was (id from 'restore --list').
+  trash    show the trash and how long each item has left; --apply permanently
+           deletes items older than the retention window. the only real delete.
   vacuum   opencode DB surgery: delete superseded snapshot events + byte-identical
            duplicates, then VACUUM. gated by a reconstruction proof. dry-run default.
            --delete-sessions-older-than N additionally deletes whole old sessions (opt-in).
@@ -106,6 +110,24 @@ examples:
   agent-janitor restore 2026-09-14T10-00-00-000Z#3
 `;
 
+const TRASH_HELP = `agent-janitor trash — inspect the trash, then (and only then) really delete.
+
+usage: agent-janitor trash [--retention <30d>] [--apply] [--json]
+
+  (no --apply)   list every trashed item with its age and what is past the window
+  --retention    window after which an item is expired (default 30d)
+  --apply        PERMANENTLY delete the expired items. this is the only command in
+                 agent-janitor that destroys data; nothing can be restored after it.
+  --json         machine-readable
+
+the trash itself is at ~/.agent-janitor/trash — you can delete it by hand at any time.
+
+examples:
+  agent-janitor trash                 # what is in there, what is expiring
+  agent-janitor trash --apply         # really delete the expired ones
+  agent-janitor trash --retention 7d --apply
+`;
+
 const VACUUM_HELP = `agent-janitor vacuum — compact the opencode SQLite DB. most sensitive command.
 
 usage: agent-janitor vacuum [--db <path>] [--retention <30d>] [--delete-sessions-older-than <90d>]
@@ -159,6 +181,7 @@ const COMMAND_HELP: Record<string, string> = {
   scan: SCAN_HELP,
   clean: CLEAN_HELP,
   restore: RESTORE_HELP,
+  trash: TRASH_HELP,
   vacuum: VACUUM_HELP,
   'codex-gc': CODEX_GC_HELP,
 };
@@ -204,23 +227,7 @@ function parse(): CliArgs {
 
 function adapterFromTarget(target: string | undefined): AdapterId | undefined {
   if (target === undefined) return undefined;
-  const valid: AdapterId[] = [
-    'opencode',
-    'codex',
-    'claude',
-    'gemini',
-    'kiro',
-    'cursor',
-    'antigravity',
-    'copilot',
-    'cline',
-    'amp',
-    'roo',
-    'openclaw',
-    'continue',
-    'aider',
-  ];
-  if (!valid.includes(target as AdapterId)) fail(`--target must be one of: ${valid.join(', ')}`);
+  if (!ADAPTER_IDS.includes(target as AdapterId)) fail(`--target must be one of: ${ADAPTER_IDS.join(', ')}`);
   return target as AdapterId;
 }
 
@@ -354,6 +361,65 @@ async function cmdRestore(args: CliArgs): Promise<void> {
     return;
   }
   console.log(`restored ${entry.originalPath}`);
+}
+
+async function cmdTrash(args: CliArgs): Promise<void> {
+  if (args.values.help === true) {
+    console.log(TRASH_HELP);
+    return;
+  }
+  const retentionDays = parseRetention(String(args.values.retention ?? '30d'));
+  const apply = args.values.apply === true;
+  const json = args.values.json === true;
+  const before = (await listTrash()).filter((e) => !e.restoredAt);
+  const result = await pruneTrash(retentionDays, apply);
+  const active = apply ? before.filter((e) => !result.expired.some((x) => x.id === e.id)) : before;
+  if (json) {
+    console.log(
+      JSON.stringify(
+        {
+          command: 'trash',
+          version: VERSION,
+          dryRun: !apply,
+          retentionDays,
+          trashPath: trashRoot(),
+          activeCount: active.length,
+          activeBytes: active.reduce((s, e) => s + e.bytes, 0),
+          expiredCount: result.expired.length,
+          ...(apply ? { deletedBytes: result.bytes, failed: result.failed } : {}),
+          entries: active,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  if (active.length === 0 && result.expired.length === 0) {
+    console.log(`Trash is empty (${trashRoot()}). Nothing to prune.`);
+    return;
+  }
+  const age = (iso: string): string => `${Math.floor((Date.now() - Date.parse(iso)) / DAY)}d`;
+  console.log(`Trash — ${trashRoot()}\n`);
+  for (const e of active) {
+    const expired = result.expired.some((x) => x.id === e.id);
+    console.log(
+      `  ${expired ? 'EXPIRED' : 'kept   '}  ${formatBytes(e.bytes).padStart(9)}  ${age(e.movedAt).padStart(3)} old  ${e.adapter.padEnd(10)}${e.originalPath}`,
+    );
+  }
+  const kept = active.length - result.expired.length;
+  console.log(`\n  ${active.length} item(s), ${formatBytes(active.reduce((s, e) => s + e.bytes, 0))} total — ${result.expired.length} past the ${retentionDays}d window, ${kept} still restorable.`);
+  if (!apply) {
+    if (result.expired.length === 0) return;
+    console.log('\nDRY RUN — nothing was deleted. To really delete the expired items:');
+    console.log('  agent-janitor trash --apply');
+    console.log('\nWARNING: after --apply those items are gone for good. Restore them first with:');
+    console.log('  agent-janitor restore <id>');
+    return;
+  }
+  console.log(`\ndeleted ${result.expired.length} expired item(s), ${formatBytes(result.bytes)} reclaimed permanently.`);
+  if (result.failed.length > 0) console.log(`${result.failed.length} could not be deleted (see below).`);
+  for (const f of result.failed) console.error(`  FAILED ${f.id}: ${f.error}`);
 }
 
 async function cmdVacuum(args: CliArgs): Promise<void> {
@@ -523,6 +589,8 @@ async function main(): Promise<void> {
       return cmdClean(args);
     case 'restore':
       return cmdRestore(args);
+    case 'trash':
+      return cmdTrash(args);
     case 'vacuum':
       return cmdVacuum(args);
     case 'codex-gc':
@@ -540,7 +608,7 @@ async function main(): Promise<void> {
         console.log(COMMAND_HELP[topic]);
         return;
       }
-      if (topic) fail(`unknown help topic "${topic}" (try: scan, clean, restore, vacuum, codex-gc)`);
+      if (topic) fail(`unknown help topic "${topic}" (try: ${Object.keys(COMMAND_HELP).join(', ')})`);
       console.log(HELP);
       return;
     }

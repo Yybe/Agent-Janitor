@@ -34,22 +34,8 @@ const SCANNERS: Record<AdapterId, (retentionDays: number) => Promise<Finding[]>>
   aider: scanAider,
 };
 
-const ALL: AdapterId[] = [
-  'opencode',
-  'codex',
-  'claude',
-  'gemini',
-  'kiro',
-  'cursor',
-  'antigravity',
-  'copilot',
-  'cline',
-  'amp',
-  'roo',
-  'openclaw',
-  'continue',
-  'aider',
-];
+/** Scan order == report order == the `--target` choices the CLI accepts. */
+export const ADAPTER_IDS = Object.keys(SCANNERS) as AdapterId[];
 
 async function scanAdapter(id: AdapterId, opts: ScanOptions): Promise<AdapterScan> {
   const scan: AdapterScan = { adapter: id, present: false, findings: [], dbReport: undefined, notes: [] };
@@ -75,7 +61,7 @@ async function scanAdapter(id: AdapterId, opts: ScanOptions): Promise<AdapterSca
 
 export async function scanAll(opts: ScanOptions): Promise<ScanResult> {
   // P0: adapters scan concurrently — wall time is the slowest adapter, not the sum
-  const adapters = await Promise.all(ALL.map((id) => scanAdapter(id, opts)));
+  const adapters = await Promise.all(ADAPTER_IDS.map((id) => scanAdapter(id, opts)));
   const trashable = (f: Finding) => f.category === 'trash';
   return {
     scannedAt: new Date().toISOString(),

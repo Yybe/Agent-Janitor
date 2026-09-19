@@ -2,6 +2,8 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { home } from '../util.js';
 
+const DAY = 86_400_000;
+
 export interface TrashEntry {
   id: string;
   batch: string;
@@ -95,6 +97,44 @@ export async function moveToTrash(input: MoveToTrashInput): Promise<TrashEntry> 
 
 export async function listTrash(): Promise<TrashEntry[]> {
   return (await readManifest()).entries;
+}
+
+export interface PruneResult {
+  expired: TrashEntry[];
+  bytes: number;
+  failed: Array<{ id: string; error: string }>;
+}
+
+/**
+ * Find (and with `apply`, permanently delete) trashed items older than `olderThanDays`.
+ * Restored entries only ever point at the original path, so they are dropped from the
+ * manifest with their batch dir and never counted as freed space.
+ */
+export async function pruneTrash(olderThanDays: number, apply: boolean): Promise<PruneResult> {
+  const cutoff = Date.now() - olderThanDays * DAY;
+  const manifest = await readManifest();
+  const expired = manifest.entries.filter((e) => !e.restoredAt && Date.parse(e.movedAt) < cutoff);
+  const failed: PruneResult['failed'] = [];
+  let bytes = 0;
+  if (apply && expired.length > 0) {
+    const victims = new Set(expired.map((e) => e.id));
+    for (const e of expired) {
+      try {
+        await fsp.rm(e.trashPath, { recursive: true, force: true });
+        bytes += e.bytes;
+      } catch (err) {
+        failed.push({ id: e.id, error: err instanceof Error ? err.message : String(err) });
+        victims.delete(e.id);
+      }
+    }
+    const remaining = manifest.entries.filter((e) => !victims.has(e.id));
+    await writeManifest({ version: 1, entries: remaining });
+    for (const dir of new Set(expired.map((e) => e.batch))) {
+      // rmdir, not rm: a fresh item in the same batch keeps the dir alive
+      await fsp.rmdir(path.join(trashRoot(), dir)).catch(() => {});
+    }
+  }
+  return { expired, bytes, failed };
 }
 
 export async function restoreFromTrash(idOrPrefix: string): Promise<TrashEntry> {

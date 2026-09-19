@@ -8,7 +8,7 @@ operations instead.
 Always read-only. Opens the OpenCode DB with `readOnly: true`, stats files,
 never writes. Exit 0 even when nothing is found.
 
-## Dry run (default for `clean`, `vacuum`, `codex-gc`)
+## Dry run (default for `clean`, `vacuum`, `codex-gc`, `trash`)
 
 Prints the plan and changes nothing. `--apply` is required to act. For `vacuum`,
 dry run still runs the lock probe, schema gate, proof, and integrity read —
@@ -57,6 +57,16 @@ affected old sessions. User branches/tags are never touched.
 
 Puts a trashed item back at its original path. Refuses when something already
 exists there (never overwrites). Restores across volumes by copy + remove.
+
+## `trash --apply`
+
+The only real delete in the tool. Without `--apply` it lists every trash entry with
+its age and marks which ones are past `--retention` (default 30d), and removes
+nothing. With `--apply` it permanently deletes exactly those expired items, rewrites
+`manifest.json`, and drops the batch directories that are now empty (`rmdir`, never
+`rm -r`, so a still-restorable item in the same batch can never be taken with it).
+Items that fail to delete stay in the manifest and are reported. Anything still
+inside the window is untouched and remains restorable.
 
 ## Refusal summary
 
