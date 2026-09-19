@@ -40,6 +40,22 @@ export function appData(...segments: string[]): string {
   return path.join(base, ...segments);
 }
 
+/**
+ * Long-lived application data root: macOS `~/Library/Application Support`, Linux
+ * `$XDG_DATA_HOME` or `~/.local/share`, Windows `%APPDATA%`. Zed splits config from data.
+ */
+export function dataDir(...segments: string[]): string {
+  const env = process.env;
+  const base =
+    env.JANITOR_DATADIR ??
+    (process.platform === 'win32'
+      ? env.APPDATA ?? home('AppData', 'Roaming')
+      : process.platform === 'darwin'
+        ? home('Library', 'Application Support')
+        : env.XDG_DATA_HOME ?? home('.local', 'share'));
+  return path.join(base, ...segments);
+}
+
 /** Updater / crash / cache root: Windows `%LOCALAPPDATA%`, macOS `~/Library/Caches`, Linux `$XDG_CACHE_HOME` or `~/.cache`. */
 export function localData(...segments: string[]): string {
   const env = process.env;

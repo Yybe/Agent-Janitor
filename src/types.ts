@@ -1,18 +1,29 @@
-export type AdapterId =
-  | 'opencode'
-  | 'codex'
-  | 'claude'
-  | 'gemini'
-  | 'kiro'
-  | 'cursor'
-  | 'antigravity'
-  | 'copilot'
-  | 'cline'
-  | 'amp'
-  | 'openclaw'
-  | 'continue'
-  | 'aider'
-  | 'roo';
+/** The one list of supported harnesses. SCANNERS and ROOTS are Record<AdapterId,…>, so the
+ *  compiler forces both to name every id here; the CLI's --target choices read this array. */
+export const ADAPTER_IDS = [
+  'opencode',
+  'codex',
+  'claude',
+  'gemini',
+  'kiro',
+  'cursor',
+  'antigravity',
+  'copilot',
+  'cline',
+  'amp',
+  'roo',
+  'openclaw',
+  'continue',
+  'aider',
+  'zed',
+  'qwen',
+  'kimi',
+  'amazonq',
+  'crush',
+  'windsurf',
+] as const;
+
+export type AdapterId = (typeof ADAPTER_IDS)[number];
 
 export type FindingCategory = 'trash' | 'report-only';
 

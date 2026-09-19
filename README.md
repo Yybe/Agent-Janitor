@@ -161,6 +161,12 @@ DRY RUN — no changes made.
 | Copilot CLI | `~/.copilot/logs/*`, old `media-cache` | move to trash | logs lost (restorable); live `data.db` never touched |
 | Cline | `.cline/data/workspaces/<old>` dirs | move to trash | old task workspace state lost (restorable) |
 | Amp | `.amp/file-changes/<old>` snapshot dirs | move to trash | old file-change snapshots lost (restorable) |
+| Zed | `logs/*.log|*.jsonl` older than retention (plus **any** log ≥50 MB — unrotated remote-server logs once reached 95 GB), code-index `embeddings/`, cache dir | move to trash | logs and the index lost (index rebuilds); `threads.db`, `db/`, extensions and `~/.config/zed` never touched |
+| Qwen Code | `~/.qwen/projects/<hash>` chat dirs, `tmp/`, `debug/`, `ide/` older than retention | move to trash | old project transcripts lost (restorable); `settings.json`, `memory.md`, `oauth_creds.json` never touched |
+| Kimi CLI | `~/.kimi/sessions/<workdir>` bundles older than retention | move to trash | old session transcripts lost (restorable); `credentials/`, `mcp-oauth/` never touched |
+| Amazon Q CLI | `~/.aws/amazonq/cli-checkouts` (shadow git copies) + CLI log dir older than retention | move to trash | shadow copies re-created on demand; your real repo, `mcp.json` and `~/.aws/sso/cache` never touched |
+| Crush | cache dir (`$XDG_CACHE_HOME/crush`, `%LOCALAPPDATA%\crush\cache`, or `$CRUSH_CACHE_DIR`) older than retention | move to trash | cache lost; per-project `.crush/crush.db` never scanned or touched |
+| Windsurf | `~/.codeium/windsurf/cascade/<old>` history bundles | move to trash | old cascade history lost (restorable); `mcp_config.json` never touched |
 
 ## What is NEVER touched
 
@@ -179,15 +185,19 @@ OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). VS-Code-family ap
 Harnesses fall into three tiers, and the difference matters:
 
 - **Cleaned** — OpenCode, Codex CLI, Claude Code, Gemini CLI, Kiro, Cursor, Antigravity, Copilot CLI,
-  Cline, Amp, Roo-Code. Paths measured, old items queued for trash.
-- **Detected only** — OpenClaw, Continue. The tool confirms the harness's home directory exists and
-  reports its precious files, but does not yet clean it: the session/log layout is not verified from a
-  primary source, and a guessed path is how a cleanup tool eats your data.
-- **Reported only** — Aider. Its history lives per repository (`.aider.chat.history.md`, `.aider.db`),
-  so there is no global store to audit; agent-janitor only points at the config it finds.
+  Cline, Amp, Roo-Code, Zed, Qwen Code, Kimi CLI, Amazon Q, Crush, Windsurf. Every path comes from the
+  harness's own source, its docs, or a confirmed bug report; old items queue for trash.
+- **Detected only** — OpenClaw, Continue. The tool measures the harness's home directory and reports
+  its precious files, but queues nothing: the session/log layout is not verified from a primary
+  source, and a guessed path is how a cleanup tool eats your data.
+- **Reported only** — Aider. Its history lives per repository (`.aider.chat.history.md`,
+  `.aider.tags.cache.v3/`), so there is no global store to audit; agent-janitor only points at the
+  config it finds.
 
 Missing harnesses are skipped quietly. Want one added and know its real storage paths?
-Open an issue with a source link — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Every row above traces to a source in [docs/agent-sources.md](docs/agent-sources.md) — add your
+harness's row there and open an issue, and the adapter is a 20-line PR
+([CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Limitations
 

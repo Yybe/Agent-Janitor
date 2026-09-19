@@ -1,7 +1,8 @@
 import { promises as fsp } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { AdapterId, Finding } from '../types.js';
-import { appData, collectFiles, exists, home, localData, walkSize } from '../util.js';
+import { appData, collectFiles, dataDir, exists, home, localData, walkSize } from '../util.js';
 
 const DAY = 86_400_000;
 
@@ -570,7 +571,9 @@ export async function scanRoo(retentionDays: number): Promise<Finding[]> {
   return out;
 }
 
-/** Dir-absent harnesses: present with a note when a marker exists, else absent. */
+/** Dir-absent harnesses: present with a note when a marker exists, else absent.
+ *  `sessions`/`logs` under these homes are the *expected* names, not verified from the
+ *  harness's own source, so nothing here is trash-eligible — report-only until proven. */
 export async function scanMarker(
   adapter: AdapterId,
   marker: string,
@@ -593,11 +596,11 @@ export async function scanMarker(
 }
 
 export async function scanOpenclaw(retentionDays: number): Promise<Finding[]> {
-  return scanMarker('openclaw', home('.openclaw'), ['sessions', 'logs'], [['openclaw.json', 'PRECIOUS — never delete']], retentionDays);
+  return scanMarker('openclaw', home('.openclaw'), [], [['', 'openclaw home measured; its session/log layout is not verified from a primary source, so nothing here is queued'], ['openclaw.json', 'PRECIOUS — never delete']], retentionDays);
 }
 
 export async function scanContinue(retentionDays: number): Promise<Finding[]> {
-  return scanMarker('continue', home('.continue'), ['sessions', 'logs'], [['config.yaml', 'PRECIOUS — never delete']], retentionDays);
+  return scanMarker('continue', home('.continue'), [], [['', 'continue home measured; its session/log layout is not verified from a primary source, so nothing here is queued'], ['config.yaml', 'PRECIOUS — never delete']], retentionDays);
 }
 
 export async function scanAider(retentionDays: number): Promise<Finding[]> {
@@ -609,4 +612,211 @@ export async function scanAider(retentionDays: number): Promise<Finding[]> {
   }
   void retentionDays;
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// zed
+// ---------------------------------------------------------------------------
+
+/**
+ * Roots from zed-industries/zed crates/paths/src/paths.rs: data_dir is
+ * ~/Library/Application Support/Zed (macOS), $XDG_DATA_HOME/zed (Linux), %LOCALAPPDATA%\Zed
+ * (Windows); config_dir is ~/.config/zed on every platform. Remote-server logs are not
+ * rotated, which is how one watcher bug wrote 95 GB into ~/.local/share/zed/logs
+ * (zed-industries/zed#57042).
+ */
+export function zedData(...segments: string[]): string {
+  if (process.platform === 'win32') return localData('Zed', ...segments);
+  return dataDir(process.platform === 'darwin' ? 'Zed' : 'zed', ...segments);
+}
+
+const FIFTY_MB = 52_428_800;
+
+export async function scanZed(retentionDays: number): Promise<Finding[]> {
+  const out: Finding[] = [];
+  const cutoff = Date.now() - retentionDays * DAY;
+  const logDirs =
+    process.platform === 'darwin' ? [home('Library', 'Logs', 'Zed'), zedData('logs')] : [zedData('logs')];
+  for (const dir of logDirs) {
+    for (const f of await collectFiles(dir, 2)) {
+      if (!/\.(log|jsonl)$/i.test(path.basename(f.path))) continue;
+      const runaway = f.bytes >= FIFTY_MB;
+      // a runaway log is reclaimable whatever its age; a small one has to be old
+      if (!runaway && !(f.mtimeMs < cutoff)) continue;
+      out.push({
+        adapter: 'zed',
+        kind: 'log',
+        path: f.path,
+        description: runaway
+          ? 'zed log at or above 50 MB (unrotated logs are a known failure mode)'
+          : `zed log older than ${retentionDays}d`,
+        bytes: f.bytes,
+        mtimeMs: f.mtimeMs,
+        category: 'trash',
+        retentionAware: !runaway,
+      });
+    }
+  }
+  if (process.platform !== 'win32') {
+    const cache = await dirFinding('zed', 'cache-dir', localData(process.platform === 'darwin' ? 'Zed' : 'zed'), 'zed cache', true, cutoff);
+    if (cache) out.push(cache);
+  }
+  const rebuild = await dirFinding('zed', 'cache-dir', zedData('embeddings'), 'zed code-index embeddings (zed re-indexes on demand)', true, cutoff);
+  if (rebuild) out.push(rebuild);
+  for (const [p, why] of [
+    [home('.config', 'zed'), 'PRECIOUS — settings.json, keymap.json, never delete'],
+    [zedData('threads', 'threads.db'), 'live SQLite DB (zed owns it)'],
+    [zedData('db'), 'live SQLite DB (zed owns it)'],
+    [zedData('extensions'), 'installed extensions (managed by zed)'],
+    [zedData('external_agents'), 'installed external agents'],
+  ] as Array<[string, string]>) {
+    const r = await finding('zed', 'report-dir', p, why, 'report-only', false);
+    if (r) out.push(r);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// qwen-code, kimi-cli, amazon-q, crush, windsurf
+// ---------------------------------------------------------------------------
+
+/** Trash `name`s directly under `base` plus whole old subdirectories of `sub`. */
+async function scanHomeTree(
+  adapter: AdapterId,
+  base: string,
+  opts: {
+    oldSubdirsOf?: Array<[string, string]>;
+    trashDirs?: Array<[string, string]>;
+    precious?: Array<[string, string]>;
+    cutoff: number;
+  },
+): Promise<Finding[]> {
+  const out: Finding[] = [];
+  if (!exists(base)) return out;
+  for (const [sub, why] of opts.oldSubdirsOf ?? []) {
+    out.push(...(await oldSubdirs(adapter, 'session-dir', path.join(base, sub), why, opts.cutoff)));
+  }
+  for (const [d, why] of opts.trashDirs ?? []) {
+    const f = await dirFinding(adapter, 'cache-dir', path.join(base, d), why, true, opts.cutoff);
+    if (f) out.push(f);
+  }
+  for (const [name, why] of opts.precious ?? []) {
+    const r = await finding(adapter, 'report-dir', path.join(base, name), why, 'report-only', false);
+    if (r) out.push(r);
+  }
+  return out;
+}
+
+/**
+ * Qwen Code: packages/core/src/config/storage.ts names TMP_DIR_NAME/DEBUG_DIR_NAME/
+ * IDE_DIR_NAME and `projects/<hash>/chats/<id>.jsonl` under ~/.qwen; settings.json,
+ * memory.md and oauth_creds.json live in the same root.
+ */
+export async function scanQwen(retentionDays: number): Promise<Finding[]> {
+  return scanHomeTree('qwen', home('.qwen'), {
+    oldSubdirsOf: [['projects', 'qwen project chat history older than retention']],
+    trashDirs: [
+      ['tmp', 'qwen tmp/ scratch older than retention'],
+      ['debug', 'qwen debug/ session logs older than retention'],
+      ['ide', 'qwen ide/ scratch older than retention'],
+    ],
+    precious: [
+      ['settings.json', 'PRECIOUS — never delete'],
+      ['memory.md', 'PRECIOUS — user memory'],
+      ['oauth_creds.json', 'PRECIOUS — credentials'],
+      ['mcp-oauth-tokens.json', 'PRECIOUS — credentials'],
+      ['commands', 'user-authored slash commands'],
+    ],
+    cutoff: Date.now() - retentionDays * DAY,
+  });
+}
+
+/**
+ * Kimi CLI (MoonshotAI/kimi-cli): sessions under ~/.kimi/sessions/<md5(workdir)>/<id>/
+ * (metadata.py `sessions_dir`, session.py:175); config.toml, credentials/ and mcp-oauth/
+ * are in the same root, the last two chmod 0700 secrets.
+ */
+export async function scanKimi(retentionDays: number): Promise<Finding[]> {
+  return scanHomeTree('kimi', home('.kimi'), {
+    oldSubdirsOf: [['sessions', 'kimi session transcripts older than retention']],
+    precious: [
+      ['config.toml', 'PRECIOUS — never delete'],
+      ['kimi.json', 'PRECIOUS — never delete'],
+      ['credentials', 'PRECIOUS — OAuth/credentials, never delete'],
+      ['mcp-oauth', 'PRECIOUS — tokens, never delete'],
+      ['plugins', 'installed plugins'],
+      ['skills', 'installed skills'],
+    ],
+    cutoff: Date.now() - retentionDays * DAY,
+  });
+}
+
+/**
+ * Amazon Q Developer CLI: crates/chat-cli/src/util/paths.rs names `SHADOW_REPO_DIR` =
+ * ~/.aws/amazonq/cli-checkouts (shadow git copies of every opened repo — the big one),
+ * `.cli_bash_history`, and `logs_dir` = $TMPDIR/qlog on unix, %TEMP%\amazon-q\logs on
+ * Windows. The sqlite store and ~/.aws/sso/cache stay report-only.
+ */
+export async function scanAmazonQ(retentionDays: number): Promise<Finding[]> {
+  const cutoff = Date.now() - retentionDays * DAY;
+  const base = home('.aws', 'amazonq');
+  const out: Finding[] = [];
+  const logDir = process.platform === 'win32' ? path.join(os.tmpdir(), 'amazon-q', 'logs') : path.join(os.tmpdir(), 'qlog');
+  const logs = await dirFinding('amazonq', 'log', logDir, 'amazon-q CLI logs older than retention', true, cutoff);
+  if (logs) out.push(logs);
+  out.push(...(await scanHomeTree('amazonq', base, {
+    trashDirs: [['cli-checkouts', 'amazon-q shadow git checkouts (q re-creates them; the real repo is untouched)']],
+    precious: [
+      ['config.json', 'PRECIOUS — never delete'],
+      ['global_context.json', 'PRECIOUS — user config'],
+      ['mcp.json', 'PRECIOUS — MCP servers'],
+      ['prompts', 'user-authored prompts'],
+      ['profiles', 'user profiles'],
+      ['knowledge_bases', 'user knowledge bases'],
+    ],
+    cutoff,
+  })));
+  for (const [p, why] of [
+    [dataDir('amazon-q', 'data.sqlite3'), 'live SQLite DB (amazon-q owns it)'],
+    [home('.aws', 'sso', 'cache'), 'PRECIOUS — SSO tokens, never delete'],
+  ] as Array<[string, string]>) {
+    const r = await finding('amazonq', 'report-dir', p, why, 'report-only', false);
+    if (r) out.push(r);
+  }
+  return out;
+}
+
+/**
+ * Crush (charmbracelet): internal/filepath GlobalCacheDir() = $XDG_CACHE_HOME/crush
+ * (Windows %LOCALAPPDATA%\crush\cache), CRUSH_CACHE_DIR overrides it; data dir holds
+ * machine state, and the sqlite DB is per-project `<cwd>/.crush/crush.db` with a
+ * `crush.lock` beside it — never scanned, never touched.
+ */
+export async function scanCrush(retentionDays: number): Promise<Finding[]> {
+  const cutoff = Date.now() - retentionDays * DAY;
+  const out: Finding[] = [];
+  const cache =
+    process.env.CRUSH_CACHE_DIR ??
+    (process.platform === 'win32' ? localData('crush', 'cache') : localData('crush'));
+  const f = await dirFinding('crush', 'cache-dir', cache, 'crush cache older than retention', true, cutoff);
+  if (f) out.push(f);
+  for (const p of [appData('crush', 'crushrc'), appData('crush', 'crush.json')]) {
+    const r = await finding('crush', 'report-dir', p, 'PRECIOUS — crush config, never delete', 'report-only', false);
+    if (r) out.push(r);
+  }
+  return out;
+}
+
+/**
+ * Windsurf (Codeium): the vendor troubleshooting doc names ~/.codeium/windsurf/cascade as
+ * where chat history lives and ~/.codeium/windsurf/mcp_config.json as config
+ * (docs.devin.ai/desktop/troubleshooting.md, docs.devin.ai/desktop/cascade/mcp.md).
+ * The IDE's Electron app-data root is not documented by the vendor, so it stays unscanned.
+ */
+export async function scanWindsurf(retentionDays: number): Promise<Finding[]> {
+  return scanHomeTree('windsurf', home('.codeium', 'windsurf'), {
+    oldSubdirsOf: [['cascade', 'windsurf cascade history older than retention']],
+    precious: [['mcp_config.json', 'PRECIOUS — MCP server config, never delete']],
+    cutoff: Date.now() - retentionDays * DAY,
+  });
 }

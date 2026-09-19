@@ -14,21 +14,21 @@ holds one harness module each (`files.ts`, `opencode/db.ts`, `codex/checkpoints.
 
 1. Write `scan<Name>(retentionDays)` in `src/adapters/files.ts` (or a new file under
    `src/adapters/`) returning `Finding[]`.
-2. Add the id to the `AdapterId` union in `src/types.ts`.
-3. Add one line to `SCANNERS` in `src/core/scan.ts`. That map is the single registry:
-   `Record<AdapterId, …>` makes the compiler reject an id without a scanner, and the
-   CLI's `--target` list and scan order both derive from it. Do not add a fourth list.
+2. Add the id to `ADAPTER_IDS` in `src/types.ts`. `AdapterId` derives from that array.
+3. Add one line each to `SCANNERS` **and** `ROOTS` in `src/core/scan.ts`. Both maps are
+   `Record<AdapterId, …>`, so the compiler rejects an id without a scanner or a root, and
+   the CLI's `--target` list and scan order derive from the same array. Do not add a fourth list.
 
 Use `appData()` for Electron/VS-Code-family roots (it is `~/Library/Application
 Support` on macOS, `%APPDATA%` on Windows, `$XDG_CONFIG_HOME` on Linux) and
 `localData()` for updater/cache roots. Never hardcode `~/.config` for a GUI app.
 
-**Path evidence is the merge bar.** Every directory an adapter reads must be backed by
-the harness's own source (a path constant you can cite by file and line), its official
-docs, or a real user-confirmed bug report — and say which in the PR. Guessing a
-directory because the naming pattern looks plausible has cost us adapters that report
-nothing (or worse, the wrong thing). An adapter that only proves the harness is
-installed is fine; label it as such in the README table instead of implying coverage.
+**Path evidence is the merge bar.** Every directory an adapter reads must already be listed in
+[`docs/agent-sources.md`](docs/agent-sources.md) with its source: a constant in the harness's
+own repo (cite file and line), its official docs, or a real user-confirmed bug report — and say
+which in the PR. Guessing a directory because the naming pattern looks plausible has cost us
+adapters that report nothing (or worse, the wrong thing). An adapter that only proves the
+harness is installed is fine; label it as such in the README table instead of implying coverage.
 
 Keep unknown-age files `retentionAware` (fail closed) and mark precious paths
 `report-only`, never `trash`. Live SQLite DBs are always `report-only`: `vacuum` is the

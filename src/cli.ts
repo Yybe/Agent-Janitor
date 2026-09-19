@@ -2,14 +2,14 @@
 import './core/quiet.js';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
-import { scanAll, ADAPTER_IDS } from './core/scan.js';
+import { scanAll } from './core/scan.js';
+import { ADAPTER_IDS, type AdapterId, type Finding } from './types.js';
 import { renderScan, renderCleanPlan, renderVacuumDryRun } from './report.js';
 import { moveToTrash, restoreFromTrash, listTrash, pruneTrash, trashRoot, type TrashEntry } from './core/trash.js';
 import { isOldEnough } from './adapters/files.js';
 import { defaultOpencodeDbPath, vacuumOpencodeDb } from './adapters/opencode/db.js';
 import { isGitRepo, planCodexGc, applyCodexGc } from './adapters/codex/checkpoints.js';
 import { formatBytes, parseRetention } from './util.js';
-import type { AdapterId, Finding } from './types.js';
 
 const DAY = 86_400_000;
 
@@ -22,7 +22,7 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-const HELP = `agent-janitor v${VERSION} — reclaim disk space from AI coding agent harnesses (opencode, codex, claude, gemini, kiro, cursor, antigravity, copilot, cline, amp, roo, openclaw, continue, aider)
+const HELP = `agent-janitor v${VERSION} — reclaim disk space from AI coding agent harnesses (${ADAPTER_IDS.join(', ')})
 
 usage:
   agent-janitor scan [--target <adapter>] [--retention <30d>] [--json]

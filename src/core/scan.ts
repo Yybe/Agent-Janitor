@@ -1,4 +1,5 @@
 import type { AdapterId, AdapterScan, ScanResult, ScanOptions, Finding } from '../types.js';
+import { ADAPTER_IDS } from '../types.js';
 import { quickOpencodeDbStats, defaultOpencodeDbPath } from '../adapters/opencode/db.js';
 import {
   scanOpencodeFiles,
@@ -15,8 +16,15 @@ import {
   scanOpenclaw,
   scanContinue,
   scanAider,
+  scanZed,
+  scanQwen,
+  scanKimi,
+  scanAmazonQ,
+  scanCrush,
+  scanWindsurf,
+  zedData,
 } from '../adapters/files.js';
-import { appData, home } from '../util.js';
+import { appData, home, localData } from '../util.js';
 
 const SCANNERS: Record<AdapterId, (retentionDays: number) => Promise<Finding[]>> = {
   opencode: scanOpencodeFiles,
@@ -33,10 +41,13 @@ const SCANNERS: Record<AdapterId, (retentionDays: number) => Promise<Finding[]>>
   openclaw: scanOpenclaw,
   continue: scanContinue,
   aider: scanAider,
+  zed: scanZed,
+  qwen: scanQwen,
+  kimi: scanKimi,
+  amazonq: scanAmazonQ,
+  crush: scanCrush,
+  windsurf: scanWindsurf,
 };
-
-/** Scan order == report order == the `--target` choices the CLI accepts. */
-export const ADAPTER_IDS = Object.keys(SCANNERS) as AdapterId[];
 
 /** Where each adapter looks. Compiled-exhaustive alongside SCANNERS, so a new adapter must state its root. */
 const ROOTS: Record<AdapterId, string> = {
@@ -54,6 +65,12 @@ const ROOTS: Record<AdapterId, string> = {
   openclaw: home('.openclaw'),
   continue: home('.continue'),
   aider: home('.aider.conf.yml'),
+  zed: zedData(),
+  qwen: home('.qwen'),
+  kimi: home('.kimi'),
+  amazonq: home('.aws', 'amazonq'),
+  crush: localData('crush'),
+  windsurf: home('.codeium', 'windsurf'),
 };
 
 async function scanAdapter(id: AdapterId, opts: ScanOptions): Promise<AdapterScan> {

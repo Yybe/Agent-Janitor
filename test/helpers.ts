@@ -38,6 +38,8 @@ export function runCli(homeRoot: string, args: string[], timeoutMs = 120_000): R
       HOME: homeRoot,
       APPDATA: fakeAppData,
       LOCALAPPDATA: path.join(homeRoot, 'AppData', 'Local'),
+      JANITOR_LOCALDATA: path.join(homeRoot, 'AppData', 'Local'),
+      JANITOR_DATADIR: path.join(homeRoot, 'data'),
       XDG_CONFIG_HOME: path.join(homeRoot, '.config'),
       XDG_DATA_HOME: path.join(homeRoot, '.local', 'share'),
     },
