@@ -14,6 +14,9 @@ registry only accepts the tag run once the account has a publish credential.
          the `NODE_AUTH_TOKEN` line below it; `id-token: write` is already set. Tokens that bypass
          2FA are being restricted for direct publishing in January 2027, so this is the route that
          keeps working, and it produces provenance attestations for free.
+- [ ] `npm profile get` reports `"tfa": true`. A fresh npm account without two-factor auth cannot
+      publish at all; the registry answers `403 Forbidden … Two-factor authentication or granular
+      access token with bypass 2fa enabled is required to publish packages.`
 - [ ] After a failed tag run there is no need to re-tag: fix the secret, then "Re-run failed jobs"
       on the Actions run for that tag.
 - [ ] `npm install` clean, `npm test` green (Linux/macOS/Windows via CI)
