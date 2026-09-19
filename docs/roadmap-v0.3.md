@@ -49,9 +49,8 @@ nvim-lspconfig and npm-check-updates:
 
 1. Publish to npm + tag + GitHub Release (`gh release create --generate-notes`). `npx github:…`
    works, `npx agent-janitor` does not, and the name-squat risk grows daily.
-2. `history` command + append-only operations log + a user-editable protect list — the two
-   questions that stop an uninstall-on-sight are "what did it do last week" and "how do I tell it
-   never to touch this". `manifest.json` answers neither today.
+2. ~~`history` command + append-only operations log~~ ✅ done in 0.3.0. Still open: a user-editable
+   protect list (`--whitelist` / `~/.agent-janitor/protect`) for "never touch this path".
 3. `SECURITY_AUDIT.md` dated and versioned, with a protected-prefix table where each row cites the
    fixture test that enforces it. `docs/safety.md` is most of the content; the test mapping is the
    trust leap.

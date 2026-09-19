@@ -1,6 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { home } from '../util.js';
 import type { SchemaGateResult } from '../types.js';
 
 /**
@@ -31,15 +32,21 @@ export async function probeDbLocks(dbPath: string): Promise<LockProbe> {
   const shm = `${dbPath}-shm`;
   const walPresent = await existsQuiet(wal);
   const shmPresent = await existsQuiet(shm);
-  if (walPresent || shmPresent) {
-    return {
-      ok: false,
-      walPresent,
-      shmPresent,
-      reason:
-        `${walPresent ? wal : shm} exists — a harness process may have this database open. ` +
-        `Close the harness (and wait a few seconds for checkpointing), then retry.`,
-    };
+  // Only a sidecar holding bytes proves anything: uncheckpointed frames may belong to a live
+  // writer. A 0-byte leftover from a crashed harness holds no data, so the read-only open
+  // below decides — it still fails closed if a writer really is on the file.
+  for (const p of walPresent ? [wal, shm] : [shm]) {
+    const st = await statQuiet(p);
+    if (st && st.size > 0) {
+      return {
+        ok: false,
+        walPresent,
+        shmPresent,
+        reason:
+          `${p} exists with ${st.size} bytes — a harness process may have this database open. ` +
+          `Close the harness (and wait a few seconds for checkpointing), then retry.`,
+      };
+    }
   }
   // read-only open proves the file is at least not exclusively locked
   try {
@@ -63,6 +70,14 @@ async function existsQuiet(p: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function statQuiet(p: string): Promise<{ size: number } | undefined> {
+  try {
+    return await fsp.stat(p);
+  } catch {
+    return undefined;
   }
 }
 
@@ -101,6 +116,33 @@ export function schemaGate(db: DatabaseSync): SchemaGateResult {
   } catch (err) {
     return { ok: false, reason: `schema gate failed: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+/**
+ * User-managed "never touch" list: `~/.agent-janitor/protect`, one path prefix per line,
+ * `#` comments allowed. The answer to "how do I tell it never to touch this".
+ */
+export async function readProtectList(): Promise<string[]> {
+  try {
+    const raw = await fsp.readFile(home('.agent-janitor', 'protect'), 'utf8');
+    return raw
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && !s.startsWith('#'))
+      .map(normalizePath);
+  } catch {
+    return [];
+  }
+}
+
+/** Accept either slash style on any OS, no trailing separator. */
+function normalizePath(p: string): string {
+  return p.replace(/[\\/]+$/, '').replaceAll('/', path.sep);
+}
+
+export function isProtected(p: string, prefixes: string[]): boolean {
+  const target = normalizePath(p);
+  return prefixes.some((prefix) => target === prefix || target.startsWith(prefix + path.sep));
 }
 
 /** Free bytes on the volume holding p. Returns undefined when unsupported. */

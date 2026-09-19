@@ -50,7 +50,7 @@ const SCANNERS: Record<AdapterId, (retentionDays: number) => Promise<Finding[]>>
 };
 
 /** Where each adapter looks. Compiled-exhaustive alongside SCANNERS, so a new adapter must state its root. */
-const ROOTS: Record<AdapterId, string> = {
+export const ROOTS: Record<AdapterId, string> = {
   opencode: home('.local', 'share', 'opencode'),
   codex: home('.codex'),
   claude: home('.claude'),

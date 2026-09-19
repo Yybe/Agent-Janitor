@@ -35,6 +35,15 @@ body:
         constant where you can.
       placeholder: https://github.com/vendor/product/blob/main/src/paths.ts#L42 — `dirs::data_dir().join("product")`
     validations: {required: true}
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Your machine's roots
+      description: >
+        Paste `agent-janitor doctor --json`. It shows where every adapter root resolved on
+        your OS, which is how a wrong macOS/Windows path gets caught instead of shipped.
+      render: json
+      placeholder: agent-janitor doctor --json
   - type: dropdown
     id: db
     attributes:

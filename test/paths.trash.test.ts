@@ -6,7 +6,7 @@ import { appData, localData } from '../src/util.js';
 import { makeTempHome, runCli, seedFakeHarnessFiles } from './helpers.js';
 
 const DAY = 86_400_000;
-const KEYS = ['JANITOR_APPDATA', 'JANITOR_LOCALDATA', 'JANITOR_HOME', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'];
+const KEYS = ['JANITOR_APPDATA', 'JANITOR_LOCALDATA', 'JANITOR_DATADIR', 'JANITOR_HOME', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'];
 
 /** Run `fn` with process.platform forced and the path env vars pinned to `env`. */
 function withEnv<T>(plat: NodeJS.Platform, env: Record<string, string>, fn: () => T): T {
@@ -86,6 +86,32 @@ test('trash lists expired items and --apply deletes them for good', () => {
     assert.equal(out.deletedBytes, before.reduce((s, e) => s + e.bytes, 0));
     assert.equal(out.activeCount, 0);
     assert.equal(read().entries.length, 0, 'pruned entries leave the manifest');
+
+    // the journal records exactly the two commands that changed something
+    const hist = JSON.parse(runCli(h.root, ['history', '--json']).stdout) as {
+      path: string;
+      events: Array<{ command: string; summary: string; items?: number }>;
+    };
+    assert.ok(existsSync(hist.path.replace(/^~/, h.root)) || existsSync(path.join(h.root, '.agent-janitor', 'history.log')), 'journal file exists');
+    assert.deepEqual(hist.events.map((e) => e.command), ['trash', 'clean'], 'newest first, dry runs absent');
+    assert.match(hist.events[0]!.summary, /permanently deleted/);
+    assert.equal(hist.events[1]!.items, before.length, 'clean event records the count');
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('history on a clean machine says so instead of inventing actions', () => {
+  const h = makeTempHome();
+  try {
+    const json = runCli(h.root, ['history', '--json']);
+    assert.equal(json.status, 0, json.stderr);
+    assert.deepEqual(JSON.parse(json.stdout).events, [], 'no journal, no events');
+
+    const human = runCli(h.root, ['history']);
+    assert.equal(human.status, 0, human.stderr);
+    assert.match(human.stdout, /No recorded actions/);
+    assert.ok(!existsSync(path.join(h.root, '.agent-janitor', 'history.log')), 'reading history writes nothing');
   } finally {
     h.cleanup();
   }

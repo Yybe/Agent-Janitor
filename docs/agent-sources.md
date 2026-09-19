@@ -25,10 +25,11 @@ release; paths move.
 | Claude Code | `~/.claude/projects`, `~/.claude/transcripts`, the 13 stale cache dirs, `history.jsonl`, `.claude.json.backup*` | b/a | anthropics/claude-code docs; `cleanupPeriodDays` is the native knob (nudge, not delete) |
 | Gemini CLI | `~/.gemini/{tmp,cache,logs,sessions,history,checkpoints}` + precious `settings.json`/`GEMINI.md`/`oauth_creds.json` | a/b/c | google-gemini/gemini-cli docs |
 | Kiro | `~/.kiro/sessions/<ws>/<sess>`, `session-index/*.jsonl`, `logs/`; precious `steering`, `settings`, `skills`, `powers` | b/a/c | Kiro CLI docs |
-| Cursor | `<appData>/Cursor/User/workspaceStorage/<hash>`, `logs`, `Crashpad`, `CachedData`, `Code Cache`, `GPUCache`; `<localData>/cursor-updater` | a/b | forum.cursor.com/t/chat-history-folder/7653 (macOS `~/Library/Application Support/Cursor/…` vs Windows `%APPDATA%\Cursor\…`) |
+| Cursor | `<appData>/Cursor/User/workspaceStorage/<hash>`, `logs`, `Crashpad`, `CachedData`, `Code Cache`, `GPUCache`; `<localData>/cursor-updater`; CLI: `~/.cursor/chats/<workspace-hash>`, `~/.cursor/projects/<id>/agent-transcripts`; precious `~/.cursor/{cli-auth.json,ide-session-token.txt,mcp.json,rules}` | a/b | forum.cursor.com/t/chat-history-folder/7653 (macOS `~/Library/Application Support/Cursor/…` vs Windows `%APPDATA%\Cursor\…`); forum.cursor.com/t/cursor-cli-past-chats-not-showing-up/152450 (CLI `~/.cursor/chats`, IDE `~/.cursor/projects/<project>/agent-transcripts`) |
 | Antigravity | `<appData>/{Antigravity,Antigravity IDE}/User/workspaceStorage`, `~/.gemini/antigravity/{conversations,browser_recordings,crashes}` | a/b | Google Antigravity troubleshooting docs |
 | Copilot (VS Code host) | `<appData>/Code/User/workspaceStorage/<hash>`; `~/.copilot/logs`, `media-cache`; `data.db` | a/b/d | GitHub Copilot docs; VS Code workspaceStorage layout |
 | Cline | `~/.cline/data/workspaces/<hash>`; precious `data/db/sessions.db`, `cline_mcp_settings.json` | b/d/c | cline `apps/vscode/src/core/storage/disk.ts` (`getClineHomePath`) |
+| Continue | `~/.continue/sessions/*.json` (index `sessions.json` kept), `~/.continue/logs`; precious `config.yaml`, `config.ts` | b/a/c | continuedev/continue `core/util/paths.ts` (`getContinueDir()`, `sessions/`, `logs/`) |
 | Roo-Code | `<appData>/Roo-Code/User/workspaceStorage/<hash>` | a/b | VS Code extension host layout (same shape as Cursor) |
 | Amp | `~/.amp/file-changes/<task-id>` | b | Amp (Sourcegraph) CLI state dir |
 | Zed | data dir: macOS `~/Library/Application Support/Zed`, Linux `$XDG_DATA_HOME/zed`, Windows `%LOCALAPPDATA%\Zed`; logs macOS `~/Library/Logs/Zed` else `<data>/logs`; cache `~/Library/Caches/Zed` / `~/.cache/zed`; `embeddings/`, `extensions/`, `external_agents/`, `threads/threads.db`, `db/`; config `~/.config/zed` on **every** platform | a/b/c/d | zed-industries/zed `crates/paths/src/paths.rs` (pinned `916fc2b`), `crates/agent/src/db.rs:444`; runaway-log failure mode: zed-industries/zed#57042 (95 GB `logs/server-setup-5.log`) |
@@ -43,7 +44,6 @@ release; paths move.
 | Harness | Why it is not cleaned |
 |---|---|
 | OpenClaw | `~/.openclaw/{sessions,logs}` are the *expected* names, not a source constant. Home is measured, nothing queued. |
-| Continue | same: `~/.continue/{sessions,logs}` unverified; `config.yaml` precious. |
 | Aider | storage is per git root (`<root>/.aider.tags.cache.v3/` from `aider/repomap.py` `TAGS_CACHE_DIR`, `.aider.chat.history.md` from `args.py:272`). A global scan would have to walk the user's repos — not what this tool does. |
 | VS Code `state.vscdb` | not verified against VS Code source in this pass; stays inside the workspaceStorage finding, which is trashed as a whole dir only after retention. |
 

@@ -45,4 +45,6 @@ assert `scan` flags the old ones, spares the fresh ones, and lists the precious 
 `Library/Application Support` file proves nothing about macOS.
 
 PRs: small diffs, tests included, `npm test` green on your machine. Bugs: include
-the command, `--json` output when possible, OS, and Node version.
+the command, `--json` output when possible, and `doctor --json` — it prints the roots this
+tool probed on your OS, which is usually the whole diagnosis. Otherwise add OS and Node
+version.

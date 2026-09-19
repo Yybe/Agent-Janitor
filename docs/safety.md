@@ -27,7 +27,9 @@ and never queued. Cross-volume moves copy then remove the original.
 Touches only the OpenCode DB given by `--db` (default
 `~/.local/share/opencode/opencode.db`). Pipeline, in order:
 
-1. Lock probe: refuses when `-wal`/`-shm` sidecars exist or read-only open fails.
+1. Lock probe: refuses when a `-wal`/`-shm` sidecar still holds bytes (uncheckpointed frames may
+   belong to a live writer) or the read-only open fails. A 0-byte sidecar left by a crash holds
+   nothing, so it does not lock `vacuum` out permanently.
 2. Schema gate: refuses unless the anchor drizzle migration and expected table
    DDL fragments match.
 3. Reconstruction proof: every live message/part must equal its newest snapshot
@@ -57,6 +59,15 @@ affected old sessions. User branches/tags are never touched.
 
 Puts a trashed item back at its original path. Refuses when something already
 exists there (never overwrites). Restores across volumes by copy + remove.
+
+## `history`
+
+Reads `~/.agent-janitor/history.log`, an append-only journal with one JSON line per
+action that changed something: `clean --apply`, `trash --apply`, `vacuum --apply`,
+`codex-gc --apply`, `restore`. Dry runs are never recorded, so an empty journal means
+nothing has been touched. The write is best-effort — a failed journal write never fails
+an apply run (the action already happened; refusing to say so would be worse than saying
+nothing). It is a local audit trail, not a tamper-proof one.
 
 ## `trash --apply`
 

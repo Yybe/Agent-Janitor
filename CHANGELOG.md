@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Fix: `vacuum` no longer locks itself out forever after a harness crash. A `-wal`/`-shm`
+  sidecar only blocks when it still holds bytes; a 0-byte leftover is judged by the read-only
+  open instead of by its name (`docs/safety.md`, fixture test added).
+- Fix: `trash --apply` drops restored entries and their emptied batch dirs out of
+  `manifest.json`, which used to grow forever.
+- Fix: the suite compiles again — `test/paths.trash.test.ts` had been truncated mid-test, so
+  `npm test` failed before running anything.
+- New: `doctor` — read-only, one line per adapter root: whether it exists, what is in it, when
+  it was last written. `doctor --json` is the paste-into-an-issue evidence that a path is
+  right (or wrong) on macOS / Windows / Linux.
+- Coverage: Cursor's CLI tree (`~/.cursor/chats/<hash>`,
+  `~/.cursor/projects/<id>/agent-transcripts`) and Continue (`~/.continue/sessions`,
+  `~/.continue/logs`) are now source-cited cleaners instead of guesses.
+- Gate: a test fails the build if an id in `ADAPTER_IDS` has no row in
+  `docs/agent-sources.md`, so the evidence corpus cannot drift from the shipped adapters.
+- Fix: a cross-volume (`EXDEV`) trash move now checks free space on the trash volume before
+  copying, instead of failing mid-copy on a 70 GB tree.
+- Issue templates ask for `doctor --json`, so path evidence arrives with the report.
+
 ## 0.3.0
 
 - Correctness: per-OS app-data roots (`appData()`/`localData()`/`dataDir()` in `src/util.ts`)
@@ -9,6 +30,9 @@
 - Coverage: Zed, Qwen Code, Kimi CLI, Amazon Q, Crush and Windsurf adapters, each path taken
   from the harness's own source constants or vendor docs. OpenClaw and Continue are honestly
   `report-only` (their layouts are unproven); Cursor's updater path moved to `%LOCALAPPDATA%`.
+- New: `history` — an append-only journal (`~/.agent-janitor/history.log`) of every action that
+  changed something: `clean`/`trash`/`vacuum`/`codex-gc` with `--apply`, and every `restore`.
+  Dry runs are never recorded. Answers "what did it do last week" without reading JSON by hand.
 - New: `trash` / `trash --apply` — the reclaimable trash no longer grows forever; expired items
   are listed first, deleted only with `--apply`, and a batch dir is only removed when empty.
 - New: `docs/agent-sources.md` — the path-evidence corpus (path, class, source, pinned commit)

@@ -53,7 +53,7 @@ Session transcripts, rollout logs, snapshot dirs, and event-sourced DB rows accu
   tool that destroys data, and it is dry-run first like everything else.
 - `vacuum` takes a timestamped DB backup (default on) and checks integrity before and after.
 - `vacuum` runs a reconstruction proof: every live row must match its newest snapshot, else abort with zero changes.
-- Locked DBs (WAL/SHM present) are refused. Unknown schemas fail closed. Unknown-age files are kept.
+- Locked DBs (a `-wal`/`-shm` sidecar still holding bytes) are refused; a 0-byte crash leftover is not a lock. Unknown schemas fail closed. Unknown-age files are kept.
 - `codex-gc` only touches `refs/codex/turn-diffs/*` and always warns it forfeits old per-turn rewind.
 
 Full contract: [docs/safety.md](docs/safety.md).
@@ -116,11 +116,29 @@ npm run dev -- scan
 | `clean` | Move trash-eligible files (old transcripts, session rollouts, snapshots, logs, stale backups) to `~/.agent-janitor/trash` with a manifest | dry-run default; `--apply` required |
 | `restore --list` / `restore <id>` | Show trash / put a trashed item back exactly where it was | never destructive (refuses overwrites) |
 | `trash` / `trash --apply` | Show what is in trash and how old it is; `--apply` permanently deletes only items past `--retention` (default 30d) | dry-run default; `--apply` is the only real delete in the tool |
+| `history` | What the tool actually did: an append-only journal of every `--apply` run and restore, newest first | never |
+| `doctor` | Which harness roots exist on this machine and where they resolved — the output to paste in a wrong-path issue | never |
 | `vacuum` | OpenCode DB surgery: delete **superseded snapshot events** + byte-identical duplicate payloads, then `VACUUM` | dry-run default; backup + proof gated |
 | `codex-gc` | Delete old Codex turn-diff checkpoint refs in a git repo, then `git gc --prune=now` | dry-run default; **forfeits per-turn rewind for affected old sessions** |
 
 Common flags: `--retention <n><d|w|m>` (default 30d), `--target <adapter>`, `--json`, `--apply`.
 Per-command help: `agent-janitor <command> --help`. Version: `agent-janitor --version`.
+
+`doctor` is the one to run first on a new machine — read-only, instant, and it names the
+directory each adapter actually probes (illustrative rows, from a Windows box):
+
+```
+$ agent-janitor doctor
+  codex    dir, 55 entries  2026-09-11  %USERPROFILE%\.codex
+  cursor   dir, 30 entries  2026-08-09  %APPDATA%\Cursor
+  zed                 absent
+  continue            absent
+  ...
+12 of 20 roots exist. 'absent' = not installed, or the path is wrong for this OS.
+```
+
+If a harness you actually use prints `absent`, either it stores elsewhere or the path is wrong
+for your OS — only you can tell. Paste `agent-janitor doctor --json` into an issue.
 
 Example shape — your run prints your own measured rows and bytes:
 
@@ -160,6 +178,8 @@ DRY RUN — no changes made.
 | Antigravity agent | `~/.gemini/antigravity/conversations/*.pb|*.db` older than retention, `browser_recordings/*`, `crashes/*` | move to trash | old conversation snapshots and recordings lost (restorable) |
 | Copilot CLI | `~/.copilot/logs/*`, old `media-cache` | move to trash | logs lost (restorable); live `data.db` never touched |
 | Cline | `.cline/data/workspaces/<old>` dirs | move to trash | old task workspace state lost (restorable) |
+| Cursor CLI | `~/.cursor/chats/<workspace-hash>` and `~/.cursor/projects/<id>/agent-transcripts` older than retention | move to trash | that chat cannot be resumed (restorable); `cli-auth.json`, `mcp.json`, `rules/` never touched |
+| Continue | `~/.continue/sessions/*.json` (index kept) + `logs/` | move to trash | old chat history lost (restorable); `config.yaml` never touched |
 | Amp | `.amp/file-changes/<old>` snapshot dirs | move to trash | old file-change snapshots lost (restorable) |
 | Zed | `logs/*.log|*.jsonl` older than retention (plus **any** log ≥50 MB — unrotated remote-server logs once reached 95 GB), code-index `embeddings/`, cache dir | move to trash | logs and the index lost (index rebuilds); `threads.db`, `db/`, extensions and `~/.config/zed` never touched |
 | Qwen Code | `~/.qwen/projects/<hash>` chat dirs, `tmp/`, `debug/`, `ide/` older than retention | move to trash | old project transcripts lost (restorable); `settings.json`, `memory.md`, `oauth_creds.json` never touched |
@@ -185,19 +205,20 @@ OS: Linux, macOS, Windows (CI runs all three; Node 22 and 24). VS-Code-family ap
 Harnesses fall into three tiers, and the difference matters:
 
 - **Cleaned** — OpenCode, Codex CLI, Claude Code, Gemini CLI, Kiro, Cursor, Antigravity, Copilot CLI,
-  Cline, Amp, Roo-Code, Zed, Qwen Code, Kimi CLI, Amazon Q, Crush, Windsurf. Every path comes from the
+  Cline, Amp, Roo-Code, Zed, Qwen Code, Kimi CLI, Amazon Q, Crush, Windsurf, Continue. Every path comes from the
   harness's own source, its docs, or a confirmed bug report; old items queue for trash.
-- **Detected only** — OpenClaw, Continue. The tool measures the harness's home directory and reports
+- **Detected only** — OpenClaw. The tool measures the harness's home directory and reports
   its precious files, but queues nothing: the session/log layout is not verified from a primary
   source, and a guessed path is how a cleanup tool eats your data.
 - **Reported only** — Aider. Its history lives per repository (`.aider.chat.history.md`,
   `.aider.tags.cache.v3/`), so there is no global store to audit; agent-janitor only points at the
   config it finds.
 
-Missing harnesses are skipped quietly. Want one added and know its real storage paths?
+Missing harnesses are skipped quietly — `agent-janitor doctor` lists all 20 roots with what it
+found at each, per OS. Want a harness added and know its real storage paths?
 Every row above traces to a source in [docs/agent-sources.md](docs/agent-sources.md) — add your
 harness's row there and open an issue, and the adapter is a 20-line PR
-([CONTRIBUTING.md](CONTRIBUTING.md)).
+([CONTRIBUTING.md](CONTRIBUTING.md)). A test fails the build if an adapter ships without that row.
 
 ## Limitations
 
@@ -206,8 +227,10 @@ Be honest with yourself before `--apply`:
 - Vacuum reclaims only superseded/duplicate event rows plus freelist; a DB full of live sessions shrinks little.
 - Size estimates are upper bounds until `VACUUM` completes.
 - `--delete-sessions-older-than` has no per-item undo beyond the whole-DB backup.
-- Lock detection is a WAL/SHM heuristic, not a kernel lock — close the harness first.
-- Trash protects against mistakes, not disk failure; cross-volume moves copy-then-remove.
+- Lock detection is a WAL/SHM heuristic, not a kernel lock — close the harness first. A 0-byte
+  sidecar left behind by a crash no longer blocks `vacuum` forever.
+- Trash protects against mistakes, not disk failure; cross-volume moves copy-then-remove, and
+  refuse up front when the destination volume lacks room.
 
 ## Development
 

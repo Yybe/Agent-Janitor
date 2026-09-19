@@ -1,6 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { home } from '../util.js';
+import { formatBytes, home } from '../util.js';
+import { diskFree } from './safety.js';
 
 const DAY = 86_400_000;
 
@@ -58,6 +59,21 @@ export interface MoveToTrashInput {
   description: string;
 }
 
+/**
+ * A cross-volume trash move copies before it removes, so a full trash volume would fail
+ * mid-copy with the original still in place. Check first and say how much is missing.
+ */
+export async function requireCopyFits(trashPath: string, bytes: number): Promise<void> {
+  const free = await diskFree(trashPath);
+  if (free !== undefined && free < bytes) {
+    throw new Error(
+      `${path.dirname(trashPath)} is on a different volume with ${formatBytes(free)} free, ` +
+        `but ${formatBytes(bytes)} must be copied there. Free space, or move the trash root ` +
+        `to the source volume before running again.`,
+    );
+  }
+}
+
 /** Move one file or directory into the janitor trash; never deletes anything. */
 export async function moveToTrash(input: MoveToTrashInput): Promise<TrashEntry> {
   const batch = new Date().toISOString().replace(/[:.]/g, '-');
@@ -72,6 +88,7 @@ export async function moveToTrash(input: MoveToTrashInput): Promise<TrashEntry> 
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
       // cross-volume: copy then remove original (still recoverable via the copy)
+      await requireCopyFits(trashPath, input.bytes);
       await fsp.cp(input.targetPath, trashPath, { recursive: true });
       await fsp.rm(input.targetPath, { recursive: true });
     } else {
@@ -107,16 +124,17 @@ export interface PruneResult {
 
 /**
  * Find (and with `apply`, permanently delete) trashed items older than `olderThanDays`.
- * Restored entries only ever point at the original path, so they are dropped from the
- * manifest with their batch dir and never counted as freed space.
+ * Restored entries point at the original path, not at trash, so `apply` drops them from the
+ * manifest with their batch dir; they never count as freed space.
  */
 export async function pruneTrash(olderThanDays: number, apply: boolean): Promise<PruneResult> {
   const cutoff = Date.now() - olderThanDays * DAY;
   const manifest = await readManifest();
   const expired = manifest.entries.filter((e) => !e.restoredAt && Date.parse(e.movedAt) < cutoff);
+  const restored = manifest.entries.filter((e) => e.restoredAt);
   const failed: PruneResult['failed'] = [];
   let bytes = 0;
-  if (apply && expired.length > 0) {
+  if (apply && (expired.length > 0 || restored.length > 0)) {
     const victims = new Set(expired.map((e) => e.id));
     for (const e of expired) {
       try {
@@ -127,9 +145,11 @@ export async function pruneTrash(olderThanDays: number, apply: boolean): Promise
         victims.delete(e.id);
       }
     }
-    const remaining = manifest.entries.filter((e) => !victims.has(e.id));
+    const dropped = new Set(victims);
+    for (const e of restored) dropped.add(e.id);
+    const remaining = manifest.entries.filter((e) => !dropped.has(e.id));
     await writeManifest({ version: 1, entries: remaining });
-    for (const dir of new Set(expired.map((e) => e.batch))) {
+    for (const dir of new Set([...expired, ...restored].map((e) => e.batch))) {
       // rmdir, not rm: a fresh item in the same batch keeps the dir alive
       await fsp.rmdir(path.join(trashRoot(), dir)).catch(() => {});
     }

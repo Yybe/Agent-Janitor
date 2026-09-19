@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 import './core/quiet.js';
 import { createRequire } from 'node:module';
+import { promises as fsp } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { scanAll } from './core/scan.js';
+import { scanAll, ROOTS } from './core/scan.js';
 import { ADAPTER_IDS, type AdapterId, type Finding } from './types.js';
 import { renderScan, renderCleanPlan, renderVacuumDryRun } from './report.js';
 import { moveToTrash, restoreFromTrash, listTrash, pruneTrash, trashRoot, type TrashEntry } from './core/trash.js';
+import { logAction, readHistory, historyPath } from './core/history.js';
+import { readProtectList, isProtected } from './core/safety.js';
 import { isOldEnough } from './adapters/files.js';
 import { defaultOpencodeDbPath, vacuumOpencodeDb } from './adapters/opencode/db.js';
 import { isGitRepo, planCodexGc, applyCodexGc } from './adapters/codex/checkpoints.js';
-import { formatBytes, parseRetention } from './util.js';
+import { formatBytes, home, parseRetention } from './util.js';
 
 const DAY = 86_400_000;
 
@@ -29,6 +32,8 @@ usage:
   agent-janitor clean [--target <adapter>] [--retention <30d>] [--apply] [--json]
   agent-janitor restore --list [--json] | restore <id>
   agent-janitor trash [--retention <30d>] [--apply] [--json]
+  agent-janitor history [--limit <50>] [--json]
+  agent-janitor doctor [--target <adapter>] [--json]
   agent-janitor vacuum [--db <path>] [--retention <30d>] [--delete-sessions-older-than <90d>]
                        [--apply] [--no-backup] [--skip-proof] [--json]
   agent-janitor codex-gc [--repo <path>] [--retention <30d>] [--apply] [--json]
@@ -42,6 +47,8 @@ commands:
   restore  put a trashed item back where it was (id from 'restore --list').
   trash    show the trash and how long each item has left; --apply permanently
            deletes items older than the retention window. the only real delete.
+  doctor   read-only: which harness roots exist on this machine, and where they
+           resolved to. the output to paste in a wrong-path issue.
   vacuum   opencode DB surgery: delete superseded snapshot events + byte-identical
            duplicates, then VACUUM. gated by a reconstruction proof. dry-run default.
            --delete-sessions-older-than N additionally deletes whole old sessions (opt-in).
@@ -91,6 +98,9 @@ default (no --apply) is a dry run: prints what would move, changes nothing.
 never touches: databases (use vacuum), settings/credentials/plugins dirs,
 report-only paths (listed by scan). files with unknown age are kept.
 
+your own veto: put path prefixes, one per line, in ~/.agent-janitor/protect and clean
+skips anything under them (comment lines start with '#').
+
 examples:
   agent-janitor clean                 # preview
   agent-janitor clean --apply         # move to trash
@@ -126,6 +136,22 @@ examples:
   agent-janitor trash                 # what is in there, what is expiring
   agent-janitor trash --apply         # really delete the expired ones
   agent-janitor trash --retention 7d --apply
+`;
+
+const HISTORY_HELP = `agent-janitor history — what this tool has actually done, newest first.
+
+usage: agent-janitor history [--limit <50>] [--json]
+
+  reads an append-only journal at ~/.agent-janitor/history.log. one line is written per
+  real change: clean --apply, trash --apply, vacuum --apply, codex-gc --apply, restore.
+  dry runs are never recorded, so an empty journal means nothing has been touched yet.
+
+  --limit   how many events to show (default 50)
+
+examples:
+  agent-janitor history                 # last actions
+  agent-janitor history --limit 200
+  agent-janitor history --json | jq '.events[] | select(.command=="trash")'
 `;
 
 const VACUUM_HELP = `agent-janitor vacuum — compact the opencode SQLite DB. most sensitive command.
@@ -177,11 +203,57 @@ examples:
   agent-janitor codex-gc --repo ~/myrepo --apply   # delete old refs + git gc --prune=now
 `;
 
+const DOCTOR_HELP = `agent-janitor doctor — what this tool can see on this machine, root by root.
+
+usage: agent-janitor doctor [--target <adapter>] [--json]
+
+read-only and instant: it stats each adapter's root directory, it never walks them.
+A root that is 'absent' means one of two things — the harness is not installed, or the
+path in docs/agent-sources.md is wrong for this OS. Only you can tell which, and the
+--json output is what a new-harness or wrong-path issue needs.
+
+examples:
+  agent-janitor doctor                  # which harnesses this tool can see here
+  agent-janitor doctor --json | jq .rows # paste into a GitHub issue
+
+`;
+
+async function cmdDoctor(args: CliArgs): Promise<void> {
+  if (args.values.help === true) {
+    console.log(DOCTOR_HELP);
+    return;
+  }
+  const target = adapterFromTarget(args.values.target as string | undefined);
+  const rows = await Promise.all(
+    ADAPTER_IDS.filter((id) => !target || id === target).map(async (adapter) => {
+      const root = ROOTS[adapter];
+      const st = await fsp.lstat(root).catch(() => undefined);
+      const kind = !st ? 'absent' : st.isSymbolicLink() ? 'symlink' : st.isDirectory() ? 'dir' : 'file';
+      const entries = st?.isDirectory() ? (await fsp.readdir(root).catch(() => [])).length : undefined;
+      return { adapter, root, kind, entries, mtime: st ? new Date(st.mtimeMs).toISOString().slice(0, 10) : undefined };
+    }),
+  );
+  if (args.values.json === true) {
+    console.log(JSON.stringify({ command: 'doctor', version: VERSION, platform: process.platform, arch: process.arch, node: process.version, home: home(), rows }, null, 2));
+    return;
+  }
+  const width = Math.max(...rows.map((r) => r.adapter.length));
+  for (const r of rows) {
+    const seen = r.kind === 'absent' ? 'absent' : `${r.kind}, ${r.entries} entr${r.entries === 1 ? 'y' : 'ies'}`;
+    console.log(`  ${r.adapter.padEnd(width)}  ${seen.padStart(16)}  ${r.mtime ?? ''}  ${r.root}`);
+  }
+  const found = rows.filter((r) => r.kind !== 'absent').length;
+  console.log(`\n${found} of ${rows.length} roots exist. 'absent' = not installed, or the path is wrong for this OS.`);
+  console.log(`Paths and their sources: docs/agent-sources.md. Run 'doctor --json' and paste it into an issue either way.`);
+}
+
 const COMMAND_HELP: Record<string, string> = {
   scan: SCAN_HELP,
   clean: CLEAN_HELP,
   restore: RESTORE_HELP,
   trash: TRASH_HELP,
+  history: HISTORY_HELP,
+  doctor: DOCTOR_HELP,
   vacuum: VACUUM_HELP,
   'codex-gc': CODEX_GC_HELP,
 };
@@ -210,6 +282,7 @@ function parse(): CliArgs {
         'delete-sessions-older-than': { type: 'string' },
         repo: { type: 'string' },
         list: { type: 'boolean', short: 'l', default: false },
+        limit: { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
         version: { type: 'boolean', short: 'v', default: false },
       },
@@ -256,9 +329,18 @@ async function cmdClean(args: CliArgs): Promise<void> {
   const json = args.values.json === true;
   const result = await scanAll({ retentionDays, target });
   const cutoff = Date.now() - retentionDays * DAY;
-  const findings: Finding[] = result.adapters
+  let findings: Finding[] = result.adapters
     .flatMap((a) => a.findings)
     .filter((f) => f.category === 'trash' && isOldEnough(f, cutoff));
+  const protect = await readProtectList();
+  if (protect.length > 0) {
+    const skipped = findings.filter((f) => isProtected(f.path, protect));
+    if (skipped.length > 0) {
+      findings = findings.filter((f) => !isProtected(f.path, protect));
+      // stderr so --json on stdout stays parseable
+      console.error(`note: skipped ${skipped.length} path(s) listed in ~/.agent-janitor/protect, e.g. ${skipped[0]!.path}`);
+    }
+  }
   if (findings.length === 0) {
     if (json) {
       console.log(JSON.stringify({ command: 'clean', version: VERSION, dryRun: !apply, retentionDays, count: 0, totalBytes: 0, findings: [] }, null, 2));
@@ -314,6 +396,9 @@ async function cmdClean(args: CliArgs): Promise<void> {
       if (!json) console.error(`  FAILED ${f.path}: ${message}`);
     }
   }
+  if (movedCount > 0) {
+    await logAction({ at: new Date().toISOString(), command: 'clean', summary: `moved ${movedCount} item(s) to trash (retention ${retentionDays}d)`, items: movedCount, bytes });
+  }
   if (json) {
     console.log(JSON.stringify({ command: 'clean', version: VERSION, dryRun: false, retentionDays, moved: movedCount, totalBytes: bytes, entries: moved, failed }, null, 2));
     return;
@@ -356,6 +441,7 @@ async function cmdRestore(args: CliArgs): Promise<void> {
     return;
   }
   const entry: TrashEntry = await restoreFromTrash(args.positionals[0]!);
+  await logAction({ at: new Date().toISOString(), command: 'restore', summary: `restored ${entry.originalPath}`, items: 1, bytes: entry.bytes });
   if (json) {
     console.log(JSON.stringify({ command: 'restore', version: VERSION, restored: entry }, null, 2));
     return;
@@ -373,6 +459,9 @@ async function cmdTrash(args: CliArgs): Promise<void> {
   const json = args.values.json === true;
   const before = (await listTrash()).filter((e) => !e.restoredAt);
   const result = await pruneTrash(retentionDays, apply);
+  if (apply && result.expired.length > 0) {
+    await logAction({ at: new Date().toISOString(), command: 'trash', summary: `permanently deleted ${result.expired.length} expired trash item(s) older than ${retentionDays}d`, items: result.expired.length, bytes: result.bytes });
+  }
   const active = apply ? before.filter((e) => !result.expired.some((x) => x.id === e.id)) : before;
   if (json) {
     console.log(
@@ -439,6 +528,15 @@ async function cmdVacuum(args: CliArgs): Promise<void> {
   const log = json ? (_msg: string): void => {} : (msg: string): void => console.log(`  ${msg}`);
   try {
     const outcome = await vacuumOpencodeDb({ dbPath, apply, backup, deleteSessionsOlderThanDays, skipProof, log });
+    if (apply) {
+      const freed = outcome.bytesAfter ? Math.max(0, outcome.bytesBefore - outcome.bytesAfter) : 0;
+      await logAction({
+        at: new Date().toISOString(),
+        command: 'vacuum',
+        summary: `compacted ${dbPath}: ${outcome.deletedSupersededRows ?? 0} superseded + ${outcome.deletedDupeRows ?? 0} dupe rows, ${outcome.deletedSessions ?? 0} sessions${outcome.backupPath ? `, backup at ${outcome.backupPath}` : ', no backup'}`,
+        bytes: freed,
+      });
+    }
     if (json) {
       console.log(
         JSON.stringify(
@@ -548,6 +646,7 @@ async function cmdCodexGc(args: CliArgs): Promise<void> {
     }
     const logged: string[] = [];
     const outcome = await applyCodexGc(plan, (m) => logged.push(m));
+    await logAction({ at: new Date().toISOString(), command: 'codex-gc', summary: `pruned ${plan.oldRefs.length} turn-diff ref(s) + git gc in ${repo}`, items: plan.oldRefs.length });
     console.log(JSON.stringify({ command: 'codex-gc', version: VERSION, dryRun: false, ...plan, ...outcome, log: logged }, null, 2));
     return;
   }
@@ -573,7 +672,33 @@ async function cmdCodexGc(args: CliArgs): Promise<void> {
     return;
   }
   await applyCodexGc(plan, (m) => console.log(`  ${m}`));
+  await logAction({ at: new Date().toISOString(), command: 'codex-gc', summary: `pruned ${plan.oldRefs.length} turn-diff ref(s) + git gc in ${repo}`, items: plan.oldRefs.length });
   console.log(`\ndeleted ${plan.oldRefs.length} ref(s); git gc complete.`);
+}
+
+/** What the tool has actually done, newest first — read from the append-only journal. */
+async function cmdHistory(args: CliArgs): Promise<void> {
+  if (args.values.help === true) {
+    console.log(HISTORY_HELP);
+    return;
+  }
+  const limit = Number(args.values.limit ?? 50);
+  const events = await readHistory(Number.isFinite(limit) && limit > 0 ? limit : 50);
+  if (args.values.json === true) {
+    console.log(JSON.stringify({ command: 'history', version: VERSION, path: historyPath(), events }, null, 2));
+    return;
+  }
+  if (events.length === 0) {
+    console.log(`No recorded actions. ${historyPath()} does not exist yet — the journal only`);
+    console.log('gets a line when a command runs with --apply (or a restore).');
+    return;
+  }
+  console.log(`agent-janitor history — ${historyPath()}\n`);
+  for (const e of events) {
+    const bytes = e.bytes ? `  ${formatBytes(e.bytes).padStart(9)}` : '';
+    console.log(`  ${e.at.slice(0, 16).replace('T', ' ')}  ${e.command.padEnd(9)} ${e.summary}${bytes}`);
+  }
+  console.log(`\n${events.length} action(s). Dry runs are never recorded; only real changes are.`);
 }
 
 async function main(): Promise<void> {
@@ -591,6 +716,10 @@ async function main(): Promise<void> {
       return cmdRestore(args);
     case 'trash':
       return cmdTrash(args);
+    case 'history':
+      return cmdHistory(args);
+    case 'doctor':
+      return cmdDoctor(args);
     case 'vacuum':
       return cmdVacuum(args);
     case 'codex-gc':

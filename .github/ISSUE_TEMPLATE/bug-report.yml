@@ -40,6 +40,13 @@ body:
         agent-janitor:
         Harness:
     validations: {required: true}
+  - type: textarea
+    id: doctor
+    attributes:
+      label: '`agent-janitor doctor --json`'
+      description: Which roots exist on this machine, and where they resolved. Usually the whole diagnosis.
+      render: json
+      placeholder: agent-janitor doctor --json
   - type: dropdown
     id: trash
     attributes:

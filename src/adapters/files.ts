@@ -474,7 +474,33 @@ export async function scanCursor(retentionDays: number): Promise<Finding[]> {
   out.push(...(await scanVscodeFamily('cursor', [appData('Cursor')], cutoff)));
   const f = await dirFinding('cursor', 'cache-dir', localData('cursor-updater'), 'cursor updater cache', true, cutoff);
   if (f) out.push(f);
-  if (out.length === 0 && !exists(appData('Cursor'))) return out;
+  // CLI side (~/.cursor): chats/<workspace-hash> is what `cursor-agent resume` reads, and the
+  // IDE writes per-project transcripts under projects/<id>/agent-transcripts. Both are the
+  // harness's own directories; auth tokens and user rules stay report-only.
+  const cli = home('.cursor');
+  out.push(...(await oldSubdirs('cursor', 'session-dir', path.join(cli, 'chats'), 'cursor CLI chat history for a workspace unused past retention (that chat cannot be resumed)', cutoff)));
+  let projects: string[] = [];
+  try {
+    projects = await fsp.readdir(path.join(cli, 'projects'));
+  } catch {
+    /* no CLI project tree */
+  }
+  for (const name of projects) {
+    const t = await dirFinding('cursor', 'session-dir', path.join(cli, 'projects', name, 'agent-transcripts'), 'cursor agent transcripts for a project unused past retention', true, cutoff);
+    if (t) out.push(t);
+  }
+  for (const [name, why] of [
+    ['cli-auth.json', 'PRECIOUS — CLI auth token, never delete'],
+    ['ide-session-token.txt', 'PRECIOUS — session token, never delete'],
+    ['mcp.json', 'PRECIOUS — MCP servers, never delete'],
+    ['rules', 'PRECIOUS — user rules'],
+    ['skills', 'user skills'],
+    ['commands', 'user slash commands'],
+  ] as Array<[string, string]>) {
+    const r = await finding('cursor', 'report-dir', path.join(cli, name), why, 'report-only', false);
+    if (r) out.push(r);
+  }
+  if (out.length === 0 && !exists(appData('Cursor')) && !exists(cli)) return out;
   return out;
 }
 
@@ -599,8 +625,29 @@ export async function scanOpenclaw(retentionDays: number): Promise<Finding[]> {
   return scanMarker('openclaw', home('.openclaw'), [], [['', 'openclaw home measured; its session/log layout is not verified from a primary source, so nothing here is queued'], ['openclaw.json', 'PRECIOUS — never delete']], retentionDays);
 }
 
+/**
+ * Continue (continuedev/continue) `core/util/paths.ts`: everything hangs off
+ * `getContinueDir()` = ~/.continue, with `sessions/` (one JSON per session plus a
+ * `sessions.json` index) and `logs/` named there. The index stays untouched so the
+ * remaining sessions keep resolving.
+ */
 export async function scanContinue(retentionDays: number): Promise<Finding[]> {
-  return scanMarker('continue', home('.continue'), [], [['', 'continue home measured; its session/log layout is not verified from a primary source, so nothing here is queued'], ['config.yaml', 'PRECIOUS — never delete']], retentionDays);
+  const cutoff = Date.now() - retentionDays * DAY;
+  const base = home('.continue');
+  const out: Finding[] = [];
+  out.push(...(await oldFiles('continue', 'session-file', path.join(base, 'sessions'), (n) => n.endsWith('.json') && n !== 'sessions.json', 'continue session transcript older than retention (its chat history goes with it)', cutoff)));
+  const logs = await dirFinding('continue', 'log', path.join(base, 'logs'), 'continue logs (ephemeral)', false, cutoff);
+  if (logs) out.push(logs);
+  for (const [name, why] of [
+    ['config.yaml', 'PRECIOUS — never delete'],
+    ['config.ts', 'PRECIOUS — never delete'],
+    [path.join('sessions', 'sessions.json'), 'session index — keep so surviving sessions resolve'],
+    [path.join('globalContext', 'LOCAL_DOC_INDEX_V1.sqlite'), 'live index DB (continue owns it)'],
+  ] as Array<[string, string]>) {
+    const r = await finding('continue', 'report-dir', path.join(base, name), why, 'report-only', false);
+    if (r) out.push(r);
+  }
+  return out;
 }
 
 export async function scanAider(retentionDays: number): Promise<Finding[]> {
