@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 - Fix: `vacuum` no longer locks itself out forever after a harness crash. A `-wal`/`-shm`
   sidecar only blocks when it still holds bytes; a 0-byte leftover is judged by the read-only

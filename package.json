@@ -1,6 +1,6 @@
 {
   "name": "agent-janitor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Cross-harness janitor for AI coding agent session storage: audit, trash-safe cleanup, and SQLite vacuum for OpenCode, Codex, Claude Code and friends.",
   "type": "module",
   "license": "MIT",
