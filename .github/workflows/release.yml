@@ -20,6 +20,13 @@ jobs:
           provenance: true
       - run: npm ci
       - run: npm test
+      - run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::secrets.NPM_TOKEN is empty or unset, so npm publish would only return a 401. See docs/release-checklist.md."
+            exit 1
+          fi
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
