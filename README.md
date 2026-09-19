@@ -203,8 +203,9 @@ Be honest with yourself before `--apply`:
 
 ```bash
 npm install        # typescript + tsx only
-npm test           # builds + runs node:test suite (unit + CLI round-trips + real-machine scan if present)
+npm test           # builds + runs node:test suite (unit + CLI round-trips)
 npm run dev -- scan
+JANITOR_REAL_DB=1 npm test   # also runs the read-only audit against your real opencode.db
 ```
 
 The test suite builds a miniature OpenCode-shaped DB with the real DDL (superseded snapshots, byte-identical dupes, a stale session) and runs the full proof → delete → VACUUM path against it, plus proof-failure and unknown-schema abort tests, trash/restore round-trips through the real CLI, and codex-gc against a synthetic repo. See [CONTRIBUTING.md](CONTRIBUTING.md).

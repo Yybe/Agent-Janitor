@@ -21,10 +21,23 @@ New adapters ship only with a verified path + citation. No more `scanMarker` gue
 
 ## Plan
 
-- **P0 correctness** — fix C1 macOS `Application Support`; add a family test that seeds the macOS layout so C2 cannot regress.
-- **P1 structure** — fix C3: derive `AdapterId` and the CLI's `--target` list from one `ADAPTER_IDS` const.
-- **P2 trust** — fix C5: `agent-janitor trash --list / --prune <90d>` over the existing manifest.
-- **P3 coverage** — fix C7/C4: add verified adapters, delete or clearly label the unverified ones.
-- **P4 distribution** — fix C6/C8/C9: `prepack` build script, npm publish workflow, tag v0.3.0, silence the SQLite warning, README truth pass.
+- **P0 correctness** — fix C1 macOS `Application Support`; add a family test that seeds the macOS layout so C2 cannot regress. ✅ done
+- **P1 structure** — fix C3: derive `AdapterId` and the CLI's `--target` list from one `ADAPTER_IDS` const. ✅ done
+- **P2 trust** — fix C5: `agent-janitor trash --list / --prune <90d>` over the existing manifest. ✅ done as `trash` / `trash --apply`
+- **P3 coverage** — fix C7/C4: add verified adapters, delete or clearly label the unverified ones. ⏳ labels done, new adapters in flight
+- **P4 distribution** — fix C6/C8/C9: `prepare` build script, npm publish workflow, tarball install smoke in CI, README truth pass. ✅ done; tag + publish pending
 
-Sequential P0-P2, then coverage. Each step lands with a test.
+## Found while executing, not yet fixed
+
+- `probeDbLocks` refuses whenever a `-wal`/`-shm` sidecar exists. After a harness crash those
+  files linger with nothing holding the DB, so `vacuum` becomes permanently unusable and the only
+  user remedy is deleting sidecars by hand. Proposed: allow a 0-byte `-wal` when the read-only
+  open succeeds, and add `--force-unlock` that says what it assumes. Safety-critical — needs its
+  own fixture test, not a drive-by change.
+- The real-machine integration test costs ~136s on a maintainer laptop (it scans a live
+  72 GB-class DB). Correct on CI where no DB exists; worth gating behind `JANITOR_REAL_DB=1`
+  so `npm test` stays a fast loop.
+- `restore` leaves restored entries in `manifest.json` forever. Harmless (bytes are back on disk,
+  not in trash), but the manifest grows. Prune them with `trash --apply`.
+- README example output is illustrative, not a captured run. A real terminal GIF or `vhs`-generated
+  tape would replace it — adoption is decided in the first eight lines.

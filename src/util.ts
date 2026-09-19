@@ -25,6 +25,8 @@ export function home(...segments: string[]): string {
 /**
  * Electron / VS-Code-family app data root, per OS:
  * Windows `%APPDATA%` (Roaming), macOS `~/Library/Application Support`, Linux `$XDG_CONFIG_HOME` or `~/.config`.
+ * Confirmed against Cursor's real layout: `~/Library/Application Support/Cursor/User/workspaceStorage`
+ * vs `%APPDATA%\Cursor\User\workspaceStorage` (forum.cursor.com/t/chat-history-folder/7653).
  */
 export function appData(...segments: string[]): string {
   const env = process.env;

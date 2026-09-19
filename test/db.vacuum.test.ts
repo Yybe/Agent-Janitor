@@ -190,11 +190,12 @@ describe('opencode db fixture', () => {
   });
 });
 
-describe('real-machine integration (skipped when no opencode.db)', () => {
+describe('real-machine integration (opt-in: JANITOR_REAL_DB=1)', () => {
   test('real DB analyzes read-only with passing schema gate', async (t) => {
-    const dbPath = defaultOpencodeDbPath();
+    // Opt-in because a real DB takes minutes; CI has no opencode.db either way.
+    const dbPath = process.env.JANITOR_REAL_DB ? defaultOpencodeDbPath() : undefined;
     if (!dbPath) {
-      t.skip('no opencode.db on this machine');
+      t.skip('set JANITOR_REAL_DB=1 with an opencode.db present to run');
       return;
     }
     const report = await analyzeOpencodeDb(dbPath, 30);
