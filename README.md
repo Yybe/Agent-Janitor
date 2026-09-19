@@ -168,7 +168,7 @@ Settings, credentials, plugins, installed plugin dependencies, `CLAUDE.md`, skil
 
 ## JSON output
 
-Every command accepts `--json`: stable structured objects (`{command, version, dryRun, ...}` plus command payload), no ANSI decoration, safe to pipe. `scan --json` emits the full `ScanResult` (adapters, findings with absolute paths/bytes/mtime, db report, totals) plus `version`. Error paths exit 1 with a plain `agent-janitor: <reason>` line on stderr — no partial JSON.
+Every command accepts `--json`: stable structured objects (`{command, version, dryRun, ...}` plus command payload), no ANSI decoration, safe to pipe. `scan --json` emits the full `ScanResult` (adapters, each with the `root` directory it probed, findings with absolute paths/bytes/mtime, db report, totals) plus `version`. A harness that turns up empty prints the path it looked at (`- cursor (no data at ~/Library/Application Support/Cursor)`), so "not installed" and "we looked in the wrong place" are distinguishable without filing anything. Error paths exit 1 with a plain `agent-janitor: <reason>` line on stderr — no partial JSON.
 
 ## Compatibility
 

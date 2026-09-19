@@ -42,6 +42,17 @@ test('localData resolves the per-OS updater/cache root', () => {
   withEnv('linux', { JANITOR_HOME: '/h' }, () => assert.equal(localData('cursor-updater'), path.join('/h', '.cache', 'cursor-updater')));
 });
 
+test('scan names the root it probed when a harness turns up empty', () => {
+  const h = makeTempHome();
+  try {
+    const out = runCli(h.root, ['scan', '--target', 'cursor']);
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /cursor \(no data at ~.*Cursor\)/);
+  } finally {
+    h.cleanup();
+  }
+});
+
 test('trash lists expired items and --apply deletes them for good', () => {
   const h = makeTempHome();
   try {

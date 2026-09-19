@@ -73,6 +73,8 @@ export interface DbReport {
 
 export interface AdapterScan {
   adapter: AdapterId;
+  /** primary directory the adapter looked in — printed so a wrong root is visible, not silent */
+  root: string;
   present: boolean;
   findings: Finding[];
   dbReport: DbReport | undefined;

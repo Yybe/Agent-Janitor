@@ -16,6 +16,7 @@ import {
   scanContinue,
   scanAider,
 } from '../adapters/files.js';
+import { appData, home } from '../util.js';
 
 const SCANNERS: Record<AdapterId, (retentionDays: number) => Promise<Finding[]>> = {
   opencode: scanOpencodeFiles,
@@ -37,8 +38,26 @@ const SCANNERS: Record<AdapterId, (retentionDays: number) => Promise<Finding[]>>
 /** Scan order == report order == the `--target` choices the CLI accepts. */
 export const ADAPTER_IDS = Object.keys(SCANNERS) as AdapterId[];
 
+/** Where each adapter looks. Compiled-exhaustive alongside SCANNERS, so a new adapter must state its root. */
+const ROOTS: Record<AdapterId, string> = {
+  opencode: home('.local', 'share', 'opencode'),
+  codex: home('.codex'),
+  claude: home('.claude'),
+  gemini: home('.gemini'),
+  kiro: home('.kiro'),
+  cursor: appData('Cursor'),
+  antigravity: appData('Antigravity'),
+  copilot: appData('Code'),
+  cline: home('.cline'),
+  amp: home('.amp'),
+  roo: appData('Roo-Code'),
+  openclaw: home('.openclaw'),
+  continue: home('.continue'),
+  aider: home('.aider.conf.yml'),
+};
+
 async function scanAdapter(id: AdapterId, opts: ScanOptions): Promise<AdapterScan> {
-  const scan: AdapterScan = { adapter: id, present: false, findings: [], dbReport: undefined, notes: [] };
+  const scan: AdapterScan = { adapter: id, root: ROOTS[id], present: false, findings: [], dbReport: undefined, notes: [] };
   if (opts.target && opts.target !== id) return scan;
   try {
     scan.findings = await SCANNERS[id](opts.retentionDays);

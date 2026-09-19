@@ -1,5 +1,11 @@
 import type { ScanResult, Finding, DbReport } from './types.js';
-import { formatBytes } from './util.js';
+import { formatBytes, home } from './util.js';
+
+/** `~` for the home prefix — probe paths are long and the tail is what matters. */
+function shortenHome(p: string): string {
+  const h = home();
+  return p === h || p.startsWith(h + '/') || p.startsWith(h + '\\') ? '~' + p.slice(h.length) : p;
+}
 
 function pad(s: string, n: number): string {
   return s.length >= n ? s : s + ' '.repeat(n - s.length);
@@ -50,7 +56,7 @@ export function renderScan(result: ScanResult, version?: string): string {
   lines.push(`Scanning AI coding-agent storage... (retention ${result.retentionDays}d)`);
   lines.push('');
   for (const a of result.adapters) {
-    lines.push(a.present ? `✓ ${a.adapter}` : `- ${a.adapter} (not found)`);
+    lines.push(a.present ? `✓ ${a.adapter}` : `- ${a.adapter} (no data at ${shortenHome(a.root)})`);
   }
   for (const a of result.adapters) {
     for (const note of a.notes) lines.push(`  note (${a.adapter}): ${note}`);
