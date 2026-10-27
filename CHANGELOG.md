@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Docs: the install instructions pointed at `npx agent-janitor` / `npm install -g agent-janitor`.
+  That name on the npm registry has belonged to an unrelated package since 2026-10-12, so both
+  resolved to somebody else's code. Every quick-start line now uses the GitHub form that actually
+  runs this tool, and the publish blocker (a distinct package name) is stated instead of
+  "coming in v0.3".
+- Chore: `actions/checkout` and `actions/setup-node` bumped to v7 in CI and release workflows;
+  `@types/node` and `tsx` bumped to the versions the open Dependabot PRs proposed.
+
 ## 0.3.1
 
 - Fix: `vacuum` no longer locks itself out forever after a harness crash. A `-wal`/`-shm`

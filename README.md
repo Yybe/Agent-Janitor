@@ -9,8 +9,8 @@ AI coding agents hoard storage: OpenCode's SQLite DB grows to 72 GB in two weeks
 Example output — numbers vary by machine:
 
 ```
-$ npx agent-janitor scan
-agent-janitor v0.2.0
+$ npx github:Yybe/Agent-Janitor scan
+agent-janitor v0.3.1
 
 Scanning AI coding-agent storage... (retention 30d)
 
@@ -60,29 +60,36 @@ Full contract: [docs/safety.md](docs/safety.md).
 
 ## Quick start
 
+Every command is safe until you pass `--apply`, so start with the read-only ones:
+
+```bash
+npx github:Yybe/Agent-Janitor doctor   # which harness roots exist on this machine
+npx github:Yybe/Agent-Janitor scan     # what is reclaimable, changes nothing
+```
+
 ### 1. Check what can be reclaimed (always safe)
 
-```
+```bash
 npx github:Yybe/Agent-Janitor scan
 ```
 
 ### 2. Preview cleanup (changes nothing)
 
-```
-npx agent-janitor clean
+```bash
+npx github:Yybe/Agent-Janitor clean
 ```
 
 ### 3. Apply cleanup (moves to trash, restorable)
 
-```
-npx agent-janitor clean --apply
+```bash
+npx github:Yybe/Agent-Janitor clean --apply
 ```
 
 ### 4. Restore something
 
-```
-npx agent-janitor restore --list
-npx agent-janitor restore <id>
+```bash
+npx github:Yybe/Agent-Janitor restore --list
+npx github:Yybe/Agent-Janitor restore <id>
 ```
 
 ## Installation
@@ -91,12 +98,14 @@ Requires Node ≥ 22.5 (uses the built-in `node:sqlite`). Zero runtime dependenc
 
 ```bash
 npx github:Yybe/Agent-Janitor scan  # run straight from GitHub, nothing installed
-npm install -g agent-janitor        # once the name is published to npm (not yet — v0.3)
 ```
 
-The `agent-janitor` name is not on the npm registry yet, so `npx agent-janitor` 404s until
-the first tagged publish (`.github/workflows/release.yml`). Everything below assumes a
-global install or `npm link`.
+**Not on npm, and `npx agent-janitor` is not a route to this tool.** The `agent-janitor` name on
+the registry belongs to an unrelated package (registered 2026-10-12), so `npx agent-janitor` and
+`npm install -g agent-janitor` resolve to somebody else's code. Publishing here needs a distinct
+name first — `@yybe/agent-janitor` or a rename — and [docs/release-checklist.md](docs/release-checklist.md)
+is the runbook for the day that decision is made. Until then, use the GitHub form above or install
+from source:
 
 Local development:
 
@@ -106,6 +115,7 @@ cd Agent-Janitor
 npm install     # prepare script builds dist/
 npm test
 npm run dev -- scan
+npm link        # optional: puts `agent-janitor` on your PATH
 ```
 
 ## Commands
