@@ -4,6 +4,11 @@ Publishing is automated: pushing a `v*` tag runs `.github/workflows/release.yml`
 tests and runs `npm publish` with provenance on `ubuntu-latest`. Nothing else publishes: the
 registry only accepts the tag run once the account has a publish credential.
 
+- [ ] **The package name is decided and owned.** `agent-janitor` on the registry belongs to an
+      unrelated package since 2026-10-12, so `npm publish` under this name is not available at any
+      price — it would fail as someone else's package (or hijack their version history). Pick a
+      distinct name or a scope (`@yybe/agent-janitor`), then rename in `package.json`, the `bin`
+      entry, `src/cli.ts` usage strings, README and `docs/`, before touching the credentials below.
 - [ ] A publish credential exists for the account. Order matters:
       1. **First publish only** — npm's trusted publishing cannot create a package, so version 1
          has to come from a token: `npm login` locally and `npm publish --access public
